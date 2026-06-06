@@ -37,9 +37,13 @@ cd /opt/microc2tracks
 # cd /opt/microc2tracks
 # sudo git pull
 
-# If conda is installed system-wide, initialize it for this shell.
-# Adjust this path if conda lives somewhere else on the server.
-source /opt/miniconda3/etc/profile.d/conda.sh
+# Load conda from wherever it is installed on this server.
+# This is safer than assuming /opt/miniconda3.
+source "$(conda info --base)/etc/profile.d/conda.sh"
+
+# Recommended before creating bioinformatics environments with conda.
+conda config --set channel_priority strict
+conda config --set solver libmamba
 
 # Create the environment at an explicit shared path.
 conda env create \
@@ -48,6 +52,149 @@ conda env create \
 
 # Activate by path, not by user-local environment name.
 conda activate /opt/conda/envs/microc2tracks
+```
+
+## Tested `biolserv` Installation Recipe
+
+This is the known-good recipe from the first successful installation on `biolserv`. It assumes:
+
+- repository path: `/opt/microc2tracks`
+- shared conda environment path: `/opt/conda/envs/microc2tracks`
+- conda base path: `/home/micgdu/miniconda3`
+- no dedicated `bioinfo` group exists
+- `micgdu` maintains the installation
+
+Clone or update the repository:
+
+```bash
+sudo mkdir -p /opt
+sudo git clone https://github.com/MichalGd/microc2tracks.git /opt/microc2tracks
+cd /opt/microc2tracks
+
+# For later updates:
+# cd /opt/microc2tracks
+# sudo git pull
+```
+
+Prepare the shared conda environment directory:
+
+```bash
+sudo mkdir -p /opt/conda/envs
+sudo chown -R micgdu:micgdu /opt/conda
+sudo chmod -R a+rX /opt/conda
+sudo chmod -R u+rwX /opt/conda
+```
+
+Load conda and use the faster conda solver:
+
+```bash
+source /home/micgdu/miniconda3/etc/profile.d/conda.sh
+
+conda config --set channel_priority strict
+conda config --set solver libmamba
+```
+
+Create and activate the shared environment:
+
+```bash
+cd /opt/microc2tracks
+
+conda env create \
+  -p /opt/conda/envs/microc2tracks \
+  -f environment.yml
+
+conda activate /opt/conda/envs/microc2tracks
+```
+
+Verify the main tools and scripts:
+
+```bash
+which fastp
+which bwa-mem2
+which pairtools
+which cooler
+which multiqc
+
+bash tests/check_bash_syntax.sh
+bash scripts/microc2tracks.sh -h
+```
+
+Expected tool paths should look like:
+
+```text
+/opt/conda/envs/microc2tracks/bin/fastp
+/opt/conda/envs/microc2tracks/bin/bwa-mem2
+/opt/conda/envs/microc2tracks/bin/pairtools
+/opt/conda/envs/microc2tracks/bin/cooler
+/opt/conda/envs/microc2tracks/bin/multiqc
+```
+
+Make the workflow and environment readable/executable for all users, while preventing accidental edits to the environment:
+
+```bash
+sudo chmod -R a+rX /opt/conda/envs/microc2tracks
+sudo chmod -R go-w /opt/conda/envs/microc2tracks
+sudo chmod -R a+rX /opt/microc2tracks
+```
+
+Because this server uses conda from `/home/micgdu/miniconda3`, other users also need read/execute access to that conda installation:
+
+```bash
+chmod -R a+rX /home/micgdu/miniconda3
+```
+
+Create system-wide launcher commands:
+
+```bash
+sudo tee /usr/local/bin/microc2tracks >/dev/null <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+source /home/micgdu/miniconda3/etc/profile.d/conda.sh
+conda activate /opt/conda/envs/microc2tracks
+exec bash /opt/microc2tracks/scripts/microc2tracks.sh "$@"
+EOF
+
+sudo tee /usr/local/bin/microc2tracks-preflight >/dev/null <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+source /home/micgdu/miniconda3/etc/profile.d/conda.sh
+conda activate /opt/conda/envs/microc2tracks
+exec bash /opt/microc2tracks/scripts/preflight_check.sh "$@"
+EOF
+
+sudo chmod 755 /usr/local/bin/microc2tracks /usr/local/bin/microc2tracks-preflight
+```
+
+Test the launchers:
+
+```bash
+which microc2tracks
+which microc2tracks-preflight
+
+microc2tracks -h
+microc2tracks-preflight -h
+```
+
+From another user account, run:
+
+```bash
+which microc2tracks
+microc2tracks -h
+microc2tracks-preflight -h
+```
+
+If those commands work from another account, the shared installation is ready.
+
+For real project use:
+
+```bash
+cd /data/projects/my_project
+cp /opt/microc2tracks/config/config_template.conf config.conf
+cp /opt/microc2tracks/config/samplesheet_template.csv samplesheet.csv
+
+# Edit config.conf and samplesheet.csv first.
+microc2tracks-preflight -c config.conf -s samplesheet.csv
+microc2tracks -c config.conf -s samplesheet.csv
 ```
 
 If `environment.yml` is too large to solve cleanly, use a two-environment strategy. Conda can do this directly; it may simply be slower than mamba:
@@ -105,7 +252,8 @@ To let users run the workflow without typing long paths, create small wrapper sc
 sudo tee /usr/local/bin/microc2tracks >/dev/null <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-source /opt/miniconda3/etc/profile.d/conda.sh
+CONDA_BASE="$(conda info --base)"
+source "${CONDA_BASE}/etc/profile.d/conda.sh"
 conda activate /opt/conda/envs/microc2tracks
 exec bash /opt/microc2tracks/scripts/microc2tracks.sh "$@"
 EOF
@@ -113,7 +261,8 @@ EOF
 sudo tee /usr/local/bin/microc2tracks-preflight >/dev/null <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-source /opt/miniconda3/etc/profile.d/conda.sh
+CONDA_BASE="$(conda info --base)"
+source "${CONDA_BASE}/etc/profile.d/conda.sh"
 conda activate /opt/conda/envs/microc2tracks
 exec bash /opt/microc2tracks/scripts/preflight_check.sh "$@"
 EOF

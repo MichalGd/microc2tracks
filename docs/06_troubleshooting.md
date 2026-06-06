@@ -40,7 +40,16 @@ Increase `THREADS_SORT` and `PAIRTOOLS_SORT_MEMORY` if RAM is available.
 
 ## Conda Environment Does Not Solve
 
-Install the core matrix environment first, then install downstream tools separately.
+First try conda's faster solver:
+
+```bash
+conda config --set channel_priority strict
+conda config --set solver libmamba
+```
+
+Then retry `conda env create`. This still uses `conda`; it only changes the solver.
+
+If it still does not solve, install the core matrix environment first, then install downstream tools separately.
 
 Core:
 

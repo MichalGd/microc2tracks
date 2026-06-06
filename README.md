@@ -114,6 +114,15 @@ Optional heavier downstream tools can be installed in a separate environment:
 conda env create -f envs/downstream_optional.yml
 ```
 
+If classic conda spends a long time solving, enable conda's faster solver and retry:
+
+```bash
+conda config --set channel_priority strict
+conda config --set solver libmamba
+```
+
+This still uses `conda`; it only changes the dependency solver.
+
 ## Shared Server Environment
 
 For an installation available to all users, create the conda environment at a shared prefix instead of using a user-local named environment:
@@ -123,7 +132,8 @@ sudo mkdir -p /opt
 sudo git clone https://github.com/MichalGd/microc2tracks.git /opt/microc2tracks
 cd /opt/microc2tracks
 
-source /opt/miniconda3/etc/profile.d/conda.sh
+# Load conda from wherever it is installed on this server.
+source "$(conda info --base)/etc/profile.d/conda.sh"
 
 conda env create \
   -p /opt/conda/envs/microc2tracks \
@@ -141,6 +151,8 @@ sudo chmod -R a+rX /shared/references /shared/software/juicer_tools
 ```
 
 See `docs/02_installation_server.md` for optional `/usr/local/bin` launchers.
+
+The server guide also includes a tested `biolserv` installation recipe covering `/opt` cloning, `/opt/conda/envs/microc2tracks`, `libmamba` solver setup, permissions without a `bioinfo` group, and shared launchers.
 
 For downstream analysis of one matrix:
 

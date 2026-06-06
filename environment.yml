@@ -3,7 +3,7 @@ channels:
   - conda-forge
   - bioconda
 dependencies:
-  - python>=3.10,<3.13
+  - python=3.11
   - fastp
   - bwa-mem2
   - samtools
@@ -11,9 +11,7 @@ dependencies:
   - pairtools
   - pairix
   - cooler
-  - cooltools
   - bioframe
-  - hictk
   - multiqc
   - openjdk
   - pandas
