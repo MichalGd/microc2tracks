@@ -94,6 +94,9 @@ Use one unified workflow with assay-specific configuration:
 ## Quick Start
 
 ```bash
+git clone https://github.com/MichalGd/microc2tracks.git
+cd microc2tracks
+
 conda env create -f environment.yml
 conda activate microc2tracks
 
@@ -116,7 +119,10 @@ conda env create -f envs/downstream_optional.yml
 For an installation available to all users, create the conda environment at a shared prefix instead of using a user-local named environment:
 
 ```bash
+sudo mkdir -p /opt
+sudo git clone https://github.com/MichalGd/microc2tracks.git /opt/microc2tracks
 cd /opt/microc2tracks
+
 source /opt/miniconda3/etc/profile.d/conda.sh
 
 conda env create \

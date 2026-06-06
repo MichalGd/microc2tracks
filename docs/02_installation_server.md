@@ -29,7 +29,13 @@ Use a shared conda prefix, not a user-private environment in one person's home d
 Recommended one-time setup by an admin or by a user with permission to write under `/opt`:
 
 ```bash
+sudo mkdir -p /opt
+sudo git clone https://github.com/MichalGd/microc2tracks.git /opt/microc2tracks
 cd /opt/microc2tracks
+
+# For future updates:
+# cd /opt/microc2tracks
+# sudo git pull
 
 # If conda is installed system-wide, initialize it for this shell.
 # Adjust this path if conda lives somewhere else on the server.
