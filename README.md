@@ -111,6 +111,31 @@ Optional heavier downstream tools can be installed in a separate environment:
 conda env create -f envs/downstream_optional.yml
 ```
 
+## Shared Server Environment
+
+For an installation available to all users, create the conda environment at a shared prefix instead of using a user-local named environment:
+
+```bash
+cd /opt/microc2tracks
+source /opt/miniconda3/etc/profile.d/conda.sh
+
+conda env create \
+  -p /opt/conda/envs/microc2tracks \
+  -f environment.yml
+
+conda activate /opt/conda/envs/microc2tracks
+```
+
+Then make the pipeline, environment, references, and Juicer Tools readable/executable:
+
+```bash
+sudo chgrp -R bioinfo /opt/microc2tracks /opt/conda/envs/microc2tracks
+sudo chmod -R a+rX /opt/microc2tracks /opt/conda/envs/microc2tracks
+sudo chmod -R a+rX /shared/references /shared/software/juicer_tools
+```
+
+See `docs/02_installation_server.md` for optional `/usr/local/bin` launchers.
+
 For downstream analysis of one matrix:
 
 ```bash
