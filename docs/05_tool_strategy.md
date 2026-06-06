@@ -30,7 +30,7 @@
 The old `microc` environment already has the upstream tools. Add optional expanded downstream tools in a separate environment:
 
 ```bash
-mamba env create -f envs/downstream_optional.yml
+conda env create -f envs/downstream_optional.yml
 ```
 
 This keeps the upstream matrix environment smaller and reduces the risk of dependency conflicts.

@@ -4,6 +4,25 @@
 
 The first implementation follows the style of the existing Shell repositories `fastq2tracks` and `rnaseq2tracksP`: a top-level runner, `config/`, `docs/`, `examples/`, `scripts/`, `environment.yml`, and simple tests.
 
+## Workflow Schematic
+
+```mermaid
+flowchart LR
+  A["Sample sheet<br/>paired FASTQ"] --> B["fastp<br/>QC + trimming"]
+  B --> C["bwa-mem2<br/>Hi-C/Micro-C alignment"]
+  C --> D["pairtools parse/sort/dedup<br/>deduplicated pairs"]
+  D --> E{"Assay profile"}
+  E -->|"Micro-C"| F["MAPQ filter<br/>near-diagonal cis filter"]
+  E -->|"Hi-C"| G["MAPQ filter<br/>restriction-aware module planned"]
+  F --> H["indexed valid .pairs.gz"]
+  G --> H
+  H --> I["cooler<br/>.cool + .mcool"]
+  H --> J["Juicer Tools<br/>.hic"]
+  I --> K["cooltools / Mustache / Chromosight<br/>TADs, compartments, loops, stripes"]
+  I --> L["comparison plots<br/>Micro-C vs Hi-C"]
+  J --> M["Juicebox / UCSC hic tracks"]
+```
+
 ## What It Produces
 
 For each sample:
@@ -24,6 +43,45 @@ Optional downstream scripts can generate:
 - loop calls with `cooltools` and/or Mustache
 - Micro-C vs Hi-C side-by-side matrix plots
 - P(s) curve comparison plots
+
+## Functionality Overview
+
+| Area | Current functionality | Main outputs | Status |
+|---|---|---|---|
+| FASTQ QC and trimming | Paired-end adapter detection and trimming | `fastp.html`, `fastp.json`, trimmed FASTQ | implemented |
+| Alignment | Hi-C/Micro-C style chimeric-read alignment with `bwa-mem2 mem -SP5M` | streamed SAM into pairtools | implemented |
+| Contact parsing | Parse, sort, deduplicate, and index contact pairs | `.dedup.pairs.gz`, `.valid.mapq*.pairs.gz`, `.px2` | implemented |
+| Micro-C filtering | MAPQ filtering plus configurable short cis-distance filter | Micro-C-ready valid pairs | implemented |
+| Hi-C support | Shared FASTQ-to-pairs-to-matrices path | Hi-C `.pairs.gz`, `.mcool`, `.hic` | implemented; restriction-fragment filtering planned |
+| Matrix generation | Raw and balanced single-resolution and multiresolution matrices | `.cool`, `.mcool` | implemented |
+| `.hic` export | Juicer-compatible `.hic` generation and normalization | `.raw.hic`, `.norm.hic` | implemented |
+| Replicate merging | Merge filtered pair files and rebuild matrices | merged `.pairs.gz`, `.mcool`, `.hic` | implemented |
+| QC aggregation | Collect QC reports where available | MultiQC report | implemented |
+| TADs / insulation | Run insulation score and boundary calling from `.mcool` | insulation tables, boundaries | implemented when `cooltools` is installed |
+| Compartments / saddle | Expected contacts, eigenvectors, saddle-ready outputs | expected TSV, eigenvectors, saddle inputs | partial; phasing track required |
+| Loops | CPU-friendly loop calling | `cooltools dots`, Mustache outputs | implemented when tools are installed |
+| Stripes | Stripe detection pathway | Chromosight outputs | planned/optional |
+| Micro-C vs Hi-C comparison | Side-by-side matched-resolution matrix plots | PNG plots | implemented |
+
+## Software Stack
+
+| Step | Default software | Link | Notes |
+|---|---|---|---|
+| Environment management | Conda | [conda](https://docs.conda.io/) | `environment.yml` is conda-first; mamba is optional, not required. |
+| FASTQ trimming/QC | fastp | [OpenGene/fastp](https://github.com/OpenGene/fastp) | Fast paired-end QC and adapter trimming. |
+| Alignment | bwa-mem2 | [bwa-mem2](https://github.com/bwa-mem2/bwa-mem2) | Uses Hi-C/Micro-C-friendly `-SP5M` flags. |
+| Reference indexing | samtools | [samtools](https://www.htslib.org/) | Creates `.fai` and chromosome sizes. |
+| Contact parsing/filtering | pairtools | [open2c/pairtools](https://github.com/open2c/pairtools) | Central `.pairs.gz` workflow backbone. |
+| Pair indexing | pairix | [4dn-dcic/pairix](https://github.com/4dn-dcic/pairix) | Indexes pairs for random access and cooler loading. |
+| Matrix storage | cooler | [open2c/cooler](https://github.com/open2c/cooler) | Creates `.cool` and `.mcool` matrices. |
+| `.hic` generation | Juicer Tools | [aidenlab/juicer](https://github.com/aidenlab/juicer) | Produces Juicebox/UCSC-compatible `.hic` files. |
+| QC reporting | MultiQC | [MultiQC](https://multiqc.info/) | Aggregates available QC outputs. |
+| Insulation/TADs | cooltools | [open2c/cooltools](https://github.com/open2c/cooltools) | Default downstream matrix analysis toolkit. |
+| Loop calling | cooltools dots, Mustache | [cooltools](https://github.com/open2c/cooltools), [Mustache](https://github.com/ay-lab/mustache) | CPU-friendly defaults for no/limited GPU servers. |
+| Stripes | Chromosight | [Chromosight](https://github.com/koszullab/chromosight) | Optional downstream module. |
+| Pileups | coolpuppy | [coolpuppy](https://github.com/open2c/coolpuppy) | Optional aggregate loop/anchor analysis. |
+| Format conversion | hictk | [hictk](https://github.com/paulsengroup/hictk) | Optional fast `.hic`/`.cool` toolkit. |
+| Alternative downstream suite | HiCExplorer | [HiCExplorer](https://github.com/deeptools/HiCExplorer) | Optional TAD/visualization tools. |
 
 ## Recommended Design
 

@@ -6,7 +6,7 @@ These notes target a shared Linux server with approximately 500 GB RAM, 70 physi
 
 ```text
 /opt/microc2tracks/                # cloned pipeline repo, readable by all users
-/opt/conda/envs/microc2tracks/     # shared conda/mamba environment
+/opt/conda/envs/microc2tracks/     # shared conda environment
 /shared/references/
   mm39/
     GRCm39.primary_assembly.genome.fa
@@ -26,20 +26,20 @@ These notes target a shared Linux server with approximately 500 GB RAM, 70 physi
 
 ```bash
 cd /opt/microc2tracks
-mamba env create -f environment.yml
+conda env create -f environment.yml
 conda activate microc2tracks
 ```
 
-If `environment.yml` is too large to solve cleanly, use a two-environment strategy:
+If `environment.yml` is too large to solve cleanly, use a two-environment strategy. Conda can do this directly; it may simply be slower than mamba:
 
 ```bash
 # Upstream matrix environment
-mamba create -n microc2tracks-core -c conda-forge -c bioconda \
+conda create -n microc2tracks-core -c conda-forge -c bioconda \
   python fastp bwa-mem2 samtools htslib pairtools pairix cooler multiqc openjdk \
   pandas numpy matplotlib bioframe
 
 # Downstream environment
-mamba create -n microc2tracks-downstream -c conda-forge -c bioconda \
+conda create -n microc2tracks-downstream -c conda-forge -c bioconda \
   python cooltools hictk mustache-hic chromosight coolpuppy hicexplorer \
   pandas numpy matplotlib bioframe
 ```
@@ -47,7 +47,7 @@ mamba create -n microc2tracks-downstream -c conda-forge -c bioconda \
 The optional downstream environment can also be created from the repository:
 
 ```bash
-mamba env create -f envs/downstream_optional.yml
+conda env create -f envs/downstream_optional.yml
 ```
 
 ## Permissions

@@ -45,14 +45,14 @@ Install the core matrix environment first, then install downstream tools separat
 Core:
 
 ```bash
-mamba create -n microc2tracks-core -c conda-forge -c bioconda \
+conda create -n microc2tracks-core -c conda-forge -c bioconda \
   python fastp bwa-mem2 samtools htslib pairtools pairix cooler multiqc openjdk
 ```
 
 Downstream:
 
 ```bash
-mamba create -n microc2tracks-downstream -c conda-forge -c bioconda \
+conda create -n microc2tracks-downstream -c conda-forge -c bioconda \
   python cooltools hictk mustache-hic chromosight coolpuppy hicexplorer
 ```
 
