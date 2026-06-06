@@ -1,0 +1,5 @@
+sample,assay,replicate_group,condition,fastq_r1,fastq_r2
+microC1,microc,PMK_Basal,basal,/data/project/PMK_Basal_MicroC_R1_1.fq.gz,/data/project/PMK_Basal_MicroC_R1_2.fq.gz
+microC2,microc,PMK_Basal,basal,/data/project/PMK_Basal_MicroC_R2_1.fq.gz,/data/project/PMK_Basal_MicroC_R2_2.fq.gz
+hic1,hic,HiC_Control,control,/data/project/HiC_Control_R1.fq.gz,/data/project/HiC_Control_R2.fq.gz
+

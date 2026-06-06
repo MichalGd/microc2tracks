@@ -1,0 +1,39 @@
+# Runtime outputs
+results/
+work/
+logs/
+tmp/
+
+# Large genomics files
+*.fastq
+*.fq
+*.fastq.gz
+*.fq.gz
+*.sam
+*.bam
+*.cram
+*.pairs.gz
+*.pairs.gz.px2
+*.cool
+*.mcool
+*.hic
+*.bw
+*.bigWig
+*.bedGraph
+
+# Reports and generated plots
+*.html
+*.pdf
+*.png
+*.svg
+
+# Local config copies
+config/config.conf
+config/samplesheet.csv
+
+# Editor/system
+.DS_Store
+Thumbs.db
+__pycache__/
+*.pyc
+

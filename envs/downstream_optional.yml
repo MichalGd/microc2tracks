@@ -1,0 +1,17 @@
+name: microc2tracks-downstream
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python>=3.10,<3.13
+  - cooltools
+  - hictk
+  - mustache-hic
+  - chromosight
+  - coolpuppy
+  - hicexplorer
+  - bioframe
+  - pandas
+  - numpy
+  - scipy
+  - matplotlib

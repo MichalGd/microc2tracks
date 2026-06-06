@@ -1,0 +1,24 @@
+name: microc2tracks
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python>=3.10,<3.13
+  - fastp
+  - bwa-mem2
+  - samtools
+  - htslib
+  - pairtools
+  - pairix
+  - cooler
+  - cooltools
+  - bioframe
+  - hictk
+  - multiqc
+  - openjdk
+  - pandas
+  - numpy
+  - scipy
+  - matplotlib
+  - pyyaml
+  - pip
