@@ -90,6 +90,8 @@ README.md
 
 The central abstraction is a filtered, deduplicated, indexed `.pairs.gz` file. Once both Micro-C and Hi-C are converted into comparable pairs and matrices, downstream modules can operate on the same `.mcool` and `.hic` products.
 
+The sample sheet separates biological and technical replicates. Each row is one technical replicate and is processed to its own `.mcool` and `.hic`; after all rows finish, rows with matching assay, condition, and biological replicate are merged as technical replicates and matrices are rebuilt from the merged pair file.
+
 ## Default Pipeline Path
 
 ```text
@@ -134,4 +136,3 @@ Use more threads for a single large run only when the server is otherwise quiet.
 ## First-Version Boundary
 
 This repository implements the shared backbone and Micro-C-ready defaults now. Hi-C is supported through the same contact-pair path, but strict restriction-fragment filtering is marked as the main next module because it requires reliable enzyme and restriction fragment metadata per sample.
-

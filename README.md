@@ -16,16 +16,20 @@ flowchart LR
   E -->|"Hi-C"| G["MAPQ filter<br/>restriction-aware module planned"]
   F --> H["indexed valid .pairs.gz"]
   G --> H
-  H --> I["cooler<br/>.cool + .mcool"]
-  H --> J["Juicer Tools<br/>.hic"]
+  H --> I["per-row matrices<br/>.cool + .mcool + .hic"]
+  H --> N["technical replicate merge<br/>same assay + condition + biological replicate"]
+  N --> O["merged matrices<br/>.cool + .mcool + .hic"]
   I --> K["cooltools / Mustache / Chromosight<br/>TADs, compartments, loops, stripes"]
+  O --> K
   I --> L["comparison plots<br/>Micro-C vs Hi-C"]
-  J --> M["Juicebox / UCSC hic tracks"]
+  O --> L
+  I --> M["Juicebox / UCSC hic tracks"]
+  O --> M
 ```
 
 ## What It Produces
 
-For each sample:
+For each sample-sheet row, interpreted as one technical replicate:
 
 - trimmed FASTQ files and `fastp` QC
 - deduplicated `.pairs.gz` contacts
@@ -34,6 +38,8 @@ For each sample:
 - raw and balanced `.mcool`
 - raw and normalized `.hic`
 - pairtools stats and MultiQC report
+
+When multiple rows share the same `assay`, `condition`, and `biological_replicate`, the workflow also merges those technical replicates after per-row processing and rebuilds merged `.pairs.gz`, `.cool`, `.mcool`, and `.hic` files. Samples without technical replicates should use `technical_replicate=1`; no redundant merged output is created for a one-row technical replicate group.
 
 Optional downstream scripts can generate:
 
@@ -52,10 +58,11 @@ Optional downstream scripts can generate:
 | Alignment | Hi-C/Micro-C style chimeric-read alignment with `bwa-mem2 mem -SP5M` | streamed SAM into pairtools | implemented |
 | Contact parsing | Parse, sort, deduplicate, and index contact pairs | `.dedup.pairs.gz`, `.valid.mapq*.pairs.gz`, `.px2` | implemented |
 | Micro-C filtering | MAPQ filtering plus configurable short cis-distance filter | Micro-C-ready valid pairs | implemented |
+| Canonical chromosomes | Optional canonical chromosome filter before `.cool`, `.mcool`, and `.hic` generation | UCSC-friendlier matrices and `.hic` files | enabled by default |
 | Hi-C support | Shared FASTQ-to-pairs-to-matrices path | Hi-C `.pairs.gz`, `.mcool`, `.hic` | implemented; restriction-fragment filtering planned |
 | Matrix generation | Raw and balanced single-resolution and multiresolution matrices | `.cool`, `.mcool` | implemented |
 | `.hic` export | Juicer-compatible `.hic` generation and normalization | `.raw.hic`, `.norm.hic` | implemented |
-| Replicate merging | Merge filtered pair files and rebuild matrices | merged `.pairs.gz`, `.mcool`, `.hic` | implemented |
+| Technical replicate merging | Merge filtered pair files within assay/condition/biological replicate groups and rebuild matrices | merged `.pairs.gz`, `.mcool`, `.hic` | implemented |
 | QC aggregation | Collect QC reports where available | MultiQC report | implemented |
 | TADs / insulation | Run insulation score and boundary calling from `.mcool` | insulation tables, boundaries | implemented when `cooltools` is installed |
 | Compartments / saddle | Expected contacts, eigenvectors, saddle-ready outputs | expected TSV, eigenvectors, saddle inputs | partial; phasing track required |
@@ -90,6 +97,7 @@ Use one unified workflow with assay-specific configuration:
 - Micro-C: no restriction fragment logic, default near-diagonal cis filter of 1000 bp.
 - Hi-C: shared alignment, pairs, matrix, and downstream path; restriction-enzyme-aware filtering can be added as a focused module when enzyme metadata are available.
 - Both assays produce `.pairs.gz`, `.mcool`, and `.hic`, which makes downstream comparison consistent.
+- By default, matrices and `.hic` files are filtered to canonical chromosomes with `FILTER_CANONICAL_CHROMS=true`; for UCSC tracks, the retained chromosome names must also match the UCSC assembly, e.g. `chr1`, `chr2`, `chrX`.
 
 ## Quick Start
 
@@ -104,6 +112,8 @@ cp config/config_template.conf config/config.conf
 cp config/samplesheet_template.csv config/samplesheet.csv
 
 # Edit config/config.conf and config/samplesheet.csv first.
+# Required sample-sheet columns:
+# sample,assay,condition,biological_replicate,technical_replicate,fastq_r1,fastq_r2
 bash scripts/preflight_check.sh -c config/config.conf -s config/samplesheet.csv
 bash scripts/microc2tracks.sh -c config/config.conf -s config/samplesheet.csv
 ```
@@ -179,7 +189,7 @@ python scripts/compare_matrices.py \
 ## Main Files
 
 - `config/config_template.conf`: server, reference, tool, and resource defaults
-- `config/samplesheet_template.csv`: sample metadata template
+- `config/samplesheet_template.csv`: sample metadata template with biological and technical replicate columns
 - `scripts/microc2tracks.sh`: FASTQ to pairs, `.cool`, `.mcool`, and `.hic`
 - `scripts/merge_replicates.sh`: merge filtered pairs and rebuild matrices
 - `scripts/run_downstream.sh`: common downstream analyses from `.mcool`

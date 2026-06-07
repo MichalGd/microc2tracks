@@ -1,5 +1,5 @@
-sample,assay,replicate_group,condition,fastq_r1,fastq_r2
-microC1,microc,PMK_Basal,basal,/data/project/PMK_Basal_MicroC_R1_1.fq.gz,/data/project/PMK_Basal_MicroC_R1_2.fq.gz
-microC2,microc,PMK_Basal,basal,/data/project/PMK_Basal_MicroC_R2_1.fq.gz,/data/project/PMK_Basal_MicroC_R2_2.fq.gz
-hic1,hic,HiC_Control,control,/data/project/HiC_Control_R1.fq.gz,/data/project/HiC_Control_R2.fq.gz
-
+sample,assay,condition,biological_replicate,technical_replicate,fastq_r1,fastq_r2
+microC_B1_T1,microc,basal,1,1,/data/project/PMK_Basal_MicroC_B1_T1_R1.fq.gz,/data/project/PMK_Basal_MicroC_B1_T1_R2.fq.gz
+microC_B1_T2,microc,basal,1,2,/data/project/PMK_Basal_MicroC_B1_T2_R1.fq.gz,/data/project/PMK_Basal_MicroC_B1_T2_R2.fq.gz
+microC_B2_T1,microc,basal,2,1,/data/project/PMK_Basal_MicroC_B2_T1_R1.fq.gz,/data/project/PMK_Basal_MicroC_B2_T1_R2.fq.gz
+hic_B1_T1,hic,control,1,1,/data/project/HiC_Control_B1_T1_R1.fq.gz,/data/project/HiC_Control_B1_T1_R2.fq.gz

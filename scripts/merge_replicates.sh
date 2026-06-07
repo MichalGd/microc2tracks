@@ -24,6 +24,60 @@ bool_true() {
   [ "${1:-false}" = "true" ] || [ "${1:-false}" = "1" ] || [ "${1:-false}" = "yes" ]
 }
 
+write_ucsc_hic_track() {
+  local sample="$1"
+  local hic_path="$2"
+  local matrix_dir="$3"
+  local hic_for_url
+  local public_url
+
+  if [ -n "${PUBLIC_HIC_DIR:-}" ]; then
+    mkdir -p "${PUBLIC_HIC_DIR}"
+    cp "${hic_path}" "${PUBLIC_HIC_DIR}/"
+    hic_for_url="$(basename "${hic_path}")"
+  else
+    hic_for_url="$(basename "${hic_path}")"
+  fi
+
+  if [ -n "${PUBLIC_HIC_BASE_URL:-}" ]; then
+    public_url="${PUBLIC_HIC_BASE_URL%/}/${hic_for_url}"
+    cat > "${matrix_dir}/${sample}.ucsc.hic.track.txt" <<TRACK
+track type=hic name="${sample}" description="${sample} normalized Hi-C/Micro-C contacts" bigDataUrl=${public_url}
+TRACK
+  fi
+}
+
+prepare_matrix_chrom_sizes() {
+  local output_chrom_sizes="$1"
+
+  if bool_true "${FILTER_CANONICAL_CHROMS:-true}"; then
+    awk -v regex="${CANONICAL_CHROMS_REGEX:-^(chr)?([1-9][0-9]?|X|Y|M|MT)$}" \
+      'BEGIN{OFS="\t"} $1 ~ regex {print $1, $2}' \
+      "${CHROM_SIZES}" > "${output_chrom_sizes}"
+  else
+    cp "${CHROM_SIZES}" "${output_chrom_sizes}"
+  fi
+
+  [ -s "${output_chrom_sizes}" ] || die "No chromosomes retained in ${output_chrom_sizes}; check CHROM_SIZES and CANONICAL_CHROMS_REGEX"
+}
+
+filter_pairs_to_chrom_sizes() {
+  local chrom_sizes="$1"
+
+  awk -v chrom_sizes="${chrom_sizes}" '
+    BEGIN {
+      FS = OFS = "\t"
+      while ((getline line < chrom_sizes) > 0) {
+        split(line, fields, "\t")
+        keep[fields[1]] = 1
+      }
+      close(chrom_sizes)
+    }
+    /^#/ { print; next }
+    (($2 in keep) && ($4 in keep)) { print }
+  '
+}
+
 CONFIG=""
 MERGE_NAME=""
 PAIRS_CSV=""
@@ -62,19 +116,33 @@ MERGE_TMP="${TMPDIR}/merged_${MERGE_NAME}"
 
 mkdir -p "${PAIRS_DIR}" "${MATRIX_DIR}" "${LOG_DIR}" "${MERGE_TMP}"
 
+MATRIX_CHROM_SIZES="${PAIRS_DIR}/${MERGE_NAME}.matrix.chrom.sizes"
+prepare_matrix_chrom_sizes "${MATRIX_CHROM_SIZES}"
+
+RAW_MERGED_PAIRS="${PAIRS_DIR}/${MERGE_NAME}.merged.valid.mapq${MAPQ_THRESHOLD}.pairs.gz"
 MERGED_PAIRS="${PAIRS_DIR}/${MERGE_NAME}.valid.mapq${MAPQ_THRESHOLD}.pairs.gz"
 
-if [ ! -s "${MERGED_PAIRS}" ]; then
+if [ ! -s "${RAW_MERGED_PAIRS}" ]; then
   log_msg "${MERGE_NAME}: merging ${#PAIR_FILES[@]} pair files"
   pairtools merge \
     --nproc "${THREADS_MERGE}" \
     --memory "${PAIRTOOLS_MERGE_MEMORY}" \
     --tmpdir "${MERGE_TMP}" \
-    -o "${MERGED_PAIRS}" \
+    -o "${RAW_MERGED_PAIRS}" \
     "${PAIR_FILES[@]}" \
     > "${LOG_DIR}/${MERGE_NAME}.pairtools_merge.log" 2>&1
 else
-  log_msg "${MERGE_NAME}: merged pairs exist, skipping merge"
+  log_msg "${MERGE_NAME}: raw merged pairs exist, skipping merge"
+fi
+
+if [ ! -s "${MERGED_PAIRS}" ]; then
+  log_msg "${MERGE_NAME}: filtering merged pairs to matrix chromosomes"
+  zcat "${RAW_MERGED_PAIRS}" \
+    | filter_pairs_to_chrom_sizes "${MATRIX_CHROM_SIZES}" \
+    | bgzip -@ "${THREADS_MATRIX}" \
+    > "${MERGED_PAIRS}"
+else
+  log_msg "${MERGE_NAME}: filtered merged pairs exist, skipping chromosome filter"
 fi
 
 if [ ! -s "${MERGED_PAIRS}.px2" ]; then
@@ -95,7 +163,7 @@ if [ ! -s "${RAW_COOL}" ]; then
   log_msg "${MERGE_NAME}: building raw cooler"
   cooler cload pairix --assembly "${GENOME_ASSEMBLY}" \
     -p "${THREADS_MATRIX}" \
-    "${CHROM_SIZES}:${BASE_RESOLUTION}" \
+    "${MATRIX_CHROM_SIZES}:${BASE_RESOLUTION}" \
     "${MERGED_PAIRS}" \
     "${RAW_COOL}" \
     > "${LOG_DIR}/${MERGE_NAME}.cooler_cload.log" 2>&1
@@ -145,7 +213,7 @@ if bool_true "${RUN_HIC:-true}"; then
       -r "${RESOLUTIONS}" \
       "${JUICER_PAIRS}" \
       "${RAW_HIC}" \
-      "${CHROM_SIZES}" \
+      "${MATRIX_CHROM_SIZES}" \
       > "${LOG_DIR}/${MERGE_NAME}.juicer_pre.log" 2>&1
   fi
 
@@ -156,7 +224,8 @@ if bool_true "${RUN_HIC:-true}"; then
       "${NORM_HIC}" \
       > "${LOG_DIR}/${MERGE_NAME}.juicer_addNorm.log" 2>&1
   fi
+
+  write_ucsc_hic_track "${MERGE_NAME}" "${NORM_HIC}" "${MATRIX_DIR}"
 fi
 
 log_msg "${MERGE_NAME}: finished"
-

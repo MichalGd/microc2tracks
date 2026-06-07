@@ -50,4 +50,4 @@ echo "Reference prepared:"
 echo "  FASTA: ${FASTA}"
 echo "  FAI: ${FASTA}.fai"
 echo "  chrom sizes: ${OUTDIR}/${ASSEMBLY}.chrom.sizes"
-
+echo "  BWA_INDEX_PREFIX for config.conf: ${FASTA}"

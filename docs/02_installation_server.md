@@ -298,6 +298,14 @@ cp /opt/microc2tracks/config/samplesheet_template.csv samplesheet.csv
 
 Edit `config.conf` so `OUTDIR`, `TMPDIR`, `REFERENCE_FASTA`, `CHROM_SIZES`, and `JUICER_TOOLS_JAR` match the server.
 
+If the BWA-MEM2 index was created with the same FASTA path, keep:
+
+```bash
+BWA_INDEX_PREFIX="$REFERENCE_FASTA"
+```
+
+If the index was created with another prefix, set `BWA_INDEX_PREFIX` explicitly.
+
 Then run:
 
 ```bash

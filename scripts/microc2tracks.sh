@@ -10,7 +10,7 @@ Runs paired-end FASTQ through:
   fastp -> bwa-mem2 -> pairtools -> cooler/mcool -> Juicer .hic
 
 Sample sheet columns:
-  sample,assay,replicate_group,condition,fastq_r1,fastq_r2
+  sample,assay,condition,biological_replicate,technical_replicate,fastq_r1,fastq_r2
 USAGE
 }
 
@@ -26,6 +26,64 @@ log_msg() {
 
 bool_true() {
   [ "${1:-false}" = "true" ] || [ "${1:-false}" = "1" ] || [ "${1:-false}" = "yes" ]
+}
+
+sanitize_id() {
+  printf '%s' "$1" | tr -c 'A-Za-z0-9_.-' '_'
+}
+
+write_ucsc_hic_track() {
+  local sample="$1"
+  local hic_path="$2"
+  local matrix_dir="$3"
+  local hic_for_url
+  local public_url
+
+  if [ -n "${PUBLIC_HIC_DIR:-}" ]; then
+    mkdir -p "${PUBLIC_HIC_DIR}"
+    cp "${hic_path}" "${PUBLIC_HIC_DIR}/"
+    hic_for_url="$(basename "${hic_path}")"
+  else
+    hic_for_url="$(basename "${hic_path}")"
+  fi
+
+  if [ -n "${PUBLIC_HIC_BASE_URL:-}" ]; then
+    public_url="${PUBLIC_HIC_BASE_URL%/}/${hic_for_url}"
+    cat > "${matrix_dir}/${sample}.ucsc.hic.track.txt" <<TRACK
+track type=hic name="${sample}" description="${sample} normalized Hi-C/Micro-C contacts" bigDataUrl=${public_url}
+TRACK
+  fi
+}
+
+prepare_matrix_chrom_sizes() {
+  local output_chrom_sizes="$1"
+
+  if bool_true "${FILTER_CANONICAL_CHROMS:-true}"; then
+    awk -v regex="${CANONICAL_CHROMS_REGEX:-^(chr)?([1-9][0-9]?|X|Y|M|MT)$}" \
+      'BEGIN{OFS="\t"} $1 ~ regex {print $1, $2}' \
+      "${CHROM_SIZES}" > "${output_chrom_sizes}"
+  else
+    cp "${CHROM_SIZES}" "${output_chrom_sizes}"
+  fi
+
+  [ -s "${output_chrom_sizes}" ] || die "No chromosomes retained in ${output_chrom_sizes}; check CHROM_SIZES and CANONICAL_CHROMS_REGEX"
+}
+
+filter_pairs_to_chrom_sizes() {
+  local chrom_sizes="$1"
+
+  awk -v chrom_sizes="${chrom_sizes}" '
+    BEGIN {
+      FS = OFS = "\t"
+      while ((getline line < chrom_sizes) > 0) {
+        split(line, fields, "\t")
+        keep[fields[1]] = 1
+      }
+      close(chrom_sizes)
+    }
+    /^#/ { print; next }
+    (($2 in keep) && ($4 in keep)) { print }
+  '
 }
 
 CONFIG=""
@@ -51,6 +109,7 @@ source "${CONFIG}"
 
 [ -f "${REFERENCE_FASTA}" ] || die "REFERENCE_FASTA not found: ${REFERENCE_FASTA}"
 [ -f "${CHROM_SIZES}" ] || die "CHROM_SIZES not found: ${CHROM_SIZES}"
+BWA_INDEX_PREFIX="${BWA_INDEX_PREFIX:-$REFERENCE_FASTA}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 python "${SCRIPT_DIR}/validate_samplesheet.py" "${SAMPLESHEET}"
@@ -76,11 +135,47 @@ build_select_expr() {
   printf '%s\n' "${expr}"
 }
 
+merge_technical_replicate_groups() {
+  local manifest="$1"
+
+  if ! bool_true "${RUN_MERGE_TECHNICAL_REPLICATES:-true}"; then
+    log_msg "Technical replicate merging disabled"
+    return 0
+  fi
+
+  [ -s "${manifest}" ] || return 0
+
+  cut -f1 "${manifest}" | sort -u | while read -r group_id; do
+    [ -n "${group_id}" ] || continue
+
+    local count
+    count="$(awk -F'\t' -v group="${group_id}" '$1 == group {count++} END{print count+0}' "${manifest}")"
+
+    if [ "${count}" -le 1 ]; then
+      log_msg "${group_id}: only one technical replicate, skipping merge"
+      continue
+    fi
+
+    local pairs_csv
+    pairs_csv="$(
+      awk -F'\t' -v group="${group_id}" '$1 == group {print $3}' "${manifest}" \
+        | paste -sd, -
+    )"
+
+    log_msg "${group_id}: merging ${count} technical replicates"
+    bash "${SCRIPT_DIR}/merge_replicates.sh" \
+      -c "${CONFIG}" \
+      -n "${group_id}" \
+      -p "${pairs_csv}"
+  done
+}
+
 build_matrices_from_pairs() {
   local sample="$1"
   local pairs="$2"
   local sample_dir="$3"
   local log_dir="$4"
+  local matrix_chrom_sizes="$5"
 
   local matrix_dir="${sample_dir}/04_matrices"
   local raw_cool="${matrix_dir}/${sample}.raw.${BASE_RESOLUTION}.cool"
@@ -97,7 +192,7 @@ build_matrices_from_pairs() {
     log_msg "${sample}: building raw cooler"
     cooler cload pairix --assembly "${GENOME_ASSEMBLY}" \
       -p "${THREADS_MATRIX}" \
-      "${CHROM_SIZES}:${BASE_RESOLUTION}" \
+      "${matrix_chrom_sizes}:${BASE_RESOLUTION}" \
       "${pairs}" \
       "${raw_cool}" \
       > "${log_dir}/${sample}.cooler_cload.log" 2>&1
@@ -159,7 +254,7 @@ build_matrices_from_pairs() {
         -r "${RESOLUTIONS}" \
         "${juicer_pairs}" \
         "${raw_hic}" \
-        "${CHROM_SIZES}" \
+        "${matrix_chrom_sizes}" \
         > "${log_dir}/${sample}.juicer_pre.log" 2>&1
     else
       log_msg "${sample}: raw hic exists, skipping"
@@ -175,6 +270,8 @@ build_matrices_from_pairs() {
     else
       log_msg "${sample}: normalized hic exists, skipping"
     fi
+
+    write_ucsc_hic_track "${sample}" "${norm_hic}" "${matrix_dir}"
   fi
 }
 
@@ -196,9 +293,11 @@ process_sample() {
   local trim_r2="${trimmed_dir}/${sample}.trim.R2.fastq.gz"
   local dedup_pairs="${pairs_dir}/${sample}.dedup.pairs.gz"
   local valid_pairs="${pairs_dir}/${sample}.valid.mapq${MAPQ_THRESHOLD}.pairs.gz"
+  local matrix_chrom_sizes="${pairs_dir}/${sample}.matrix.chrom.sizes"
   local select_expr
 
   mkdir -p "${qc_dir}" "${trimmed_dir}" "${pairs_dir}" "${log_dir}" "${sample_tmp}"
+  prepare_matrix_chrom_sizes "${matrix_chrom_sizes}"
 
   log_msg "${sample}: assay=${assay}"
 
@@ -225,7 +324,7 @@ process_sample() {
 
   if [ ! -s "${dedup_pairs}" ]; then
     log_msg "${sample}: aligning, parsing, sorting, and deduplicating pairs"
-    bwa-mem2 mem ${BWA_EXTRA_ARGS:-} -t "${THREADS_ALIGN}" "${REFERENCE_FASTA}" "${trim_r1}" "${trim_r2}" \
+    bwa-mem2 mem ${BWA_EXTRA_ARGS:-} -t "${THREADS_ALIGN}" "${BWA_INDEX_PREFIX}" "${trim_r1}" "${trim_r2}" \
       2> "${log_dir}/${sample}.bwa_mem2.log" \
       | pairtools parse \
           -c "${CHROM_SIZES}" \
@@ -254,6 +353,7 @@ process_sample() {
     select_expr="$(build_select_expr "${assay}")"
     log_msg "${sample}: selecting valid pairs with expression: ${select_expr}"
     pairtools select "${select_expr}" "${dedup_pairs}" \
+      | filter_pairs_to_chrom_sizes "${matrix_chrom_sizes}" \
       | bgzip -@ "${THREADS_SORT}" \
       > "${valid_pairs}"
   else
@@ -266,7 +366,7 @@ process_sample() {
 
   pairtools stats "${valid_pairs}" > "${pairs_dir}/${sample}.pairs.stats.txt"
 
-  build_matrices_from_pairs "${sample}" "${valid_pairs}" "${sample_dir}" "${log_dir}"
+  build_matrices_from_pairs "${sample}" "${valid_pairs}" "${sample_dir}" "${log_dir}" "${matrix_chrom_sizes}"
 
   if bool_true "${RUN_MULTIQC:-true}"; then
     log_msg "${sample}: running MultiQC"
@@ -278,10 +378,19 @@ process_sample() {
 }
 
 mkdir -p "${OUTDIR}" "${TMPDIR}"
+TECH_MANIFEST="${TMPDIR}/microc2tracks.technical_replicates.$$.tsv"
+: > "${TECH_MANIFEST}"
 
-tail -n +2 "${SAMPLESHEET}" | while IFS=, read -r sample assay replicate_group condition fastq_r1 fastq_r2 rest; do
+tail -n +2 "${SAMPLESHEET}" | while IFS=, read -r sample assay condition biological_replicate technical_replicate fastq_r1 fastq_r2 rest; do
   [ -n "${sample// }" ] || continue
   process_sample "${sample}" "${assay}" "${fastq_r1}" "${fastq_r2}"
+  assay_group="$(printf '%s' "${assay}" | tr '[:upper:]' '[:lower:]')"
+  group_id="$(sanitize_id "${condition}_${assay_group}_B${biological_replicate}_tech_merged")"
+  valid_pairs="${OUTDIR}/${sample}/03_pairs/${sample}.valid.mapq${MAPQ_THRESHOLD}.pairs.gz"
+  printf '%s\t%s\t%s\n' "${group_id}" "${sample}" "${valid_pairs}" >> "${TECH_MANIFEST}"
 done
+
+merge_technical_replicate_groups "${TECH_MANIFEST}"
+rm -f "${TECH_MANIFEST}"
 
 log_msg "All samples finished"

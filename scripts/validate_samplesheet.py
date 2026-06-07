@@ -8,7 +8,15 @@ import sys
 from pathlib import Path
 
 
-REQUIRED_COLUMNS = ["sample", "assay", "replicate_group", "condition", "fastq_r1", "fastq_r2"]
+REQUIRED_COLUMNS = [
+    "sample",
+    "assay",
+    "condition",
+    "biological_replicate",
+    "technical_replicate",
+    "fastq_r1",
+    "fastq_r2",
+]
 VALID_ASSAYS = {"microc", "hic"}
 
 
@@ -35,6 +43,7 @@ def main() -> None:
             fail(f"Missing required column(s): {', '.join(missing)}")
 
         seen_samples: set[str] = set()
+        seen_technical_replicates: set[tuple[str, str, str, str]] = set()
         rows = 0
         errors: list[str] = []
 
@@ -42,6 +51,9 @@ def main() -> None:
             rows += 1
             sample = (row.get("sample") or "").strip()
             assay = (row.get("assay") or "").strip().lower()
+            condition = (row.get("condition") or "").strip()
+            biological_replicate = (row.get("biological_replicate") or "").strip()
+            technical_replicate = (row.get("technical_replicate") or "").strip()
             r1 = (row.get("fastq_r1") or "").strip()
             r2 = (row.get("fastq_r2") or "").strip()
 
@@ -54,6 +66,28 @@ def main() -> None:
 
             if assay not in VALID_ASSAYS:
                 errors.append(f"line {line_number}: assay must be one of {sorted(VALID_ASSAYS)}")
+
+            if not condition:
+                errors.append(f"line {line_number}: condition is empty")
+
+            if not biological_replicate:
+                errors.append(f"line {line_number}: biological_replicate is empty")
+            elif not biological_replicate.isdigit():
+                errors.append(f"line {line_number}: biological_replicate must be an integer-like value")
+
+            if not technical_replicate:
+                errors.append(f"line {line_number}: technical_replicate is empty")
+            elif not technical_replicate.isdigit():
+                errors.append(f"line {line_number}: technical_replicate must be an integer-like value")
+
+            tech_key = (assay, condition, biological_replicate, technical_replicate)
+            if all(tech_key) and tech_key in seen_technical_replicates:
+                errors.append(
+                    f"line {line_number}: duplicate technical_replicate '{technical_replicate}' "
+                    f"for assay={assay}, condition={condition}, biological_replicate={biological_replicate}"
+                )
+            else:
+                seen_technical_replicates.add(tech_key)
 
             if not r1:
                 errors.append(f"line {line_number}: fastq_r1 is empty")

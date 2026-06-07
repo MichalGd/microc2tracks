@@ -87,6 +87,21 @@ done
 
 [ -f "${REFERENCE_FASTA}" ] || die "REFERENCE_FASTA not found: ${REFERENCE_FASTA}"
 [ -f "${CHROM_SIZES}" ] || die "CHROM_SIZES not found: ${CHROM_SIZES}"
+BWA_INDEX_PREFIX="${BWA_INDEX_PREFIX:-$REFERENCE_FASTA}"
+
+if [ ! -f "${BWA_INDEX_PREFIX}.bwt.2bit.64" ]; then
+  echo "WARNING: BWA-MEM2 index file not found: ${BWA_INDEX_PREFIX}.bwt.2bit.64" >&2
+  echo "         Create it with: bwa-mem2 index \"${BWA_INDEX_PREFIX}\"" >&2
+  echo "         If the index prefix differs from REFERENCE_FASTA, set BWA_INDEX_PREFIX in config.conf." >&2
+fi
+
+if [ "${FILTER_CANONICAL_CHROMS:-true}" = "true" ]; then
+  retained_chroms="$(
+    awk -v regex="${CANONICAL_CHROMS_REGEX:-^(chr)?([1-9][0-9]?|X|Y|M|MT)$}" '$1 ~ regex {count++} END{print count+0}' "${CHROM_SIZES}"
+  )"
+  [ "${retained_chroms}" -gt 0 ] || die "FILTER_CANONICAL_CHROMS=true but CANONICAL_CHROMS_REGEX retained no chromosomes from CHROM_SIZES"
+  echo "Canonical chromosome filter retains ${retained_chroms} chromosome(s)."
+fi
 
 if [ "${RUN_HIC:-true}" = "true" ]; then
   [ -f "${JUICER_TOOLS_JAR:-}" ] || die "RUN_HIC=true but JUICER_TOOLS_JAR not found: ${JUICER_TOOLS_JAR:-unset}"
@@ -99,4 +114,3 @@ echo "Checking chromosome-size first entry..."
 head -n 1 "${CHROM_SIZES}" || true
 
 echo "Preflight finished successfully."
-
