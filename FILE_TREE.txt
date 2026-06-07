@@ -1,4 +1,6 @@
 microc2tracks/
+  .gitattributes
+  .gitignore
   README.md
   environment.yml
   FILE_TREE.txt
@@ -20,14 +22,6 @@ microc2tracks/
   examples/
     run_hic_example.sh
     run_microc_example.sh
-  info/
-    microC_conda_env.txt
-  method_review/
-    HiC_MicroC_analysis_perp_rev_tools_april2026.md
-    MIcroC_HiC_preliminary_considerations_5june2026.md
-    perplexity_review_6june26.md
-  prompts/
-    MicroC_workflow_prompt_6june2026.md
   scripts/
     compare_matrices.py
     merge_replicates.sh
@@ -36,6 +30,7 @@ microc2tracks/
     preflight_check.sh
     prepare_reference.sh
     run_downstream.sh
+    sanitize_text_inputs.py
     validate_samplesheet.py
   tests/
     check_bash_syntax.sh

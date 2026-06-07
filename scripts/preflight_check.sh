@@ -33,6 +33,10 @@ done
 [ -f "${CONFIG}" ] || die "Config not found: ${CONFIG}"
 [ -f "${SAMPLESHEET}" ] || die "Sample sheet not found: ${SAMPLESHEET}"
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+python "${SCRIPT_DIR}/sanitize_text_inputs.py" --kind config "${CONFIG}"
+python "${SCRIPT_DIR}/sanitize_text_inputs.py" --kind samplesheet "${SAMPLESHEET}"
+
 # shellcheck source=/dev/null
 source "${CONFIG}"
 
@@ -107,8 +111,7 @@ if [ "${RUN_HIC:-true}" = "true" ]; then
   [ -f "${JUICER_TOOLS_JAR:-}" ] || die "RUN_HIC=true but JUICER_TOOLS_JAR not found: ${JUICER_TOOLS_JAR:-unset}"
 fi
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-python "${SCRIPT_DIR}/validate_samplesheet.py" "${SAMPLESHEET}"
+python "${SCRIPT_DIR}/validate_samplesheet.py" --require-files "${SAMPLESHEET}"
 
 echo "Checking chromosome-size first entry..."
 head -n 1 "${CHROM_SIZES}" || true

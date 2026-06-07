@@ -37,6 +37,16 @@ Validate the file before running:
 python scripts/validate_samplesheet.py config/samplesheet.csv
 ```
 
+The preflight check and main runner first run `scripts/sanitize_text_inputs.py` on `config.conf` and the sample sheet. This automatically fixes common Windows/copy-paste artifacts before Bash or CSV parsing:
+
+- CRLF or stray carriage-return line endings
+- UTF-8 byte-order marks
+- non-breaking spaces
+- copied smart quotes
+- surrounding whitespace around sample-sheet fields
+
+After this cleanup, preflight and the main runner use stricter validation and require FASTQ files to exist and be readable before the run starts.
+
 ## Main Config Values
 
 `REFERENCE_FASTA` and `CHROM_SIZES` must use matching chromosome names.

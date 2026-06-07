@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import csv
+import os
 import sys
 from pathlib import Path
 
@@ -26,10 +27,17 @@ def fail(message: str) -> None:
 
 
 def main() -> None:
-    if len(sys.argv) != 2:
-        fail("Usage: validate_samplesheet.py config/samplesheet.csv")
+    require_files = False
+    args = sys.argv[1:]
 
-    sheet = Path(sys.argv[1])
+    if "--require-files" in args:
+        require_files = True
+        args.remove("--require-files")
+
+    if len(args) != 1:
+        fail("Usage: validate_samplesheet.py [--require-files] config/samplesheet.csv")
+
+    sheet = Path(args[0])
     if not sheet.exists():
         fail(f"Sample sheet does not exist: {sheet}")
 
@@ -38,6 +46,7 @@ def main() -> None:
         if reader.fieldnames is None:
             fail("Sample sheet is empty")
 
+        reader.fieldnames = [column.strip().lstrip("\ufeff") for column in reader.fieldnames]
         missing = [column for column in REQUIRED_COLUMNS if column not in reader.fieldnames]
         if missing:
             fail(f"Missing required column(s): {', '.join(missing)}")
@@ -95,8 +104,20 @@ def main() -> None:
                 errors.append(f"line {line_number}: fastq_r2 is empty")
 
             for label, value in [("fastq_r1", r1), ("fastq_r2", r2)]:
-                if value and not Path(value).exists():
-                    print(f"WARNING: line {line_number}: {label} path not found now: {value}", file=sys.stderr)
+                if not value:
+                    continue
+
+                path = Path(value)
+                if not path.exists():
+                    message = f"line {line_number}: {label} path not found: {value}"
+                    if require_files:
+                        errors.append(message)
+                    else:
+                        print(f"WARNING: {message}", file=sys.stderr)
+                elif not path.is_file():
+                    errors.append(f"line {line_number}: {label} is not a regular file: {value}")
+                elif not os.access(path, os.R_OK):
+                    errors.append(f"line {line_number}: {label} is not readable: {value}")
 
         if rows == 0:
             fail("Sample sheet has no data rows")

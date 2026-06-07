@@ -54,6 +54,7 @@ Optional downstream scripts can generate:
 
 | Area | Current functionality | Main outputs | Status |
 |---|---|---|---|
+| Input hygiene | Checks and normalizes config/sample-sheet text artifacts before parsing | Unix line endings, cleaned CSV fields | implemented |
 | FASTQ QC and trimming | Paired-end adapter detection and trimming | `fastp.html`, `fastp.json`, trimmed FASTQ | implemented |
 | Alignment | Hi-C/Micro-C style chimeric-read alignment with `bwa-mem2 mem -SP5M` | streamed SAM into pairtools | implemented |
 | Contact parsing | Parse, sort, deduplicate, and index contact pairs | `.dedup.pairs.gz`, `.valid.mapq*.pairs.gz`, `.px2` | implemented |
@@ -190,6 +191,7 @@ python scripts/compare_matrices.py \
 
 - `config/config_template.conf`: server, reference, tool, and resource defaults
 - `config/samplesheet_template.csv`: sample metadata template with biological and technical replicate columns
+- `scripts/sanitize_text_inputs.py`: automatic line-ending/BOM/CSV-field cleanup used by preflight and the main runner
 - `scripts/microc2tracks.sh`: FASTQ to pairs, `.cool`, `.mcool`, and `.hic`
 - `scripts/merge_replicates.sh`: merge filtered pairs and rebuild matrices
 - `scripts/run_downstream.sh`: common downstream analyses from `.mcool`

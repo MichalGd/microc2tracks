@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
 usage() {
   cat <<'USAGE'
@@ -24,12 +24,30 @@ log_msg() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] ${message}"
 }
 
+on_error() {
+  local exit_code="$1"
+  local line_no="$2"
+  local command="$3"
+  echo "ERROR: microc2tracks failed with exit code ${exit_code} at line ${line_no}" >&2
+  echo "ERROR: failed command: ${command}" >&2
+  echo "ERROR: check the newest log under ${OUTDIR:-results}/*/logs/ or ${OUTDIR:-results}/merged/*/logs/" >&2
+  exit "${exit_code}"
+}
+
+trap 'on_error "$?" "$LINENO" "$BASH_COMMAND"' ERR
+
 bool_true() {
   [ "${1:-false}" = "true" ] || [ "${1:-false}" = "1" ] || [ "${1:-false}" = "yes" ]
 }
 
 sanitize_id() {
   printf '%s' "$1" | tr -c 'A-Za-z0-9_.-' '_'
+}
+
+clean_csv_field() {
+  printf '%s' "$1" \
+    | tr -d '\r\n' \
+    | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//'
 }
 
 write_ucsc_hic_track() {
@@ -104,6 +122,10 @@ done
 [ -f "${CONFIG}" ] || die "Config not found: ${CONFIG}"
 [ -f "${SAMPLESHEET}" ] || die "Sample sheet not found: ${SAMPLESHEET}"
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+python "${SCRIPT_DIR}/sanitize_text_inputs.py" --kind config "${CONFIG}"
+python "${SCRIPT_DIR}/sanitize_text_inputs.py" --kind samplesheet "${SAMPLESHEET}"
+
 # shellcheck source=/dev/null
 source "${CONFIG}"
 
@@ -111,8 +133,7 @@ source "${CONFIG}"
 [ -f "${CHROM_SIZES}" ] || die "CHROM_SIZES not found: ${CHROM_SIZES}"
 BWA_INDEX_PREFIX="${BWA_INDEX_PREFIX:-$REFERENCE_FASTA}"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-python "${SCRIPT_DIR}/validate_samplesheet.py" "${SAMPLESHEET}"
+python "${SCRIPT_DIR}/validate_samplesheet.py" --require-files "${SAMPLESHEET}"
 
 build_select_expr() {
   local assay="$1"
@@ -304,7 +325,7 @@ process_sample() {
   if bool_true "${RUN_FASTP:-true}"; then
     if [ ! -s "${trim_r1}" ] || [ ! -s "${trim_r2}" ]; then
       log_msg "${sample}: running fastp"
-      fastp \
+      if ! fastp \
         -i "${fastq_r1}" \
         -I "${fastq_r2}" \
         -o "${trim_r1}" \
@@ -313,7 +334,12 @@ process_sample() {
         --html "${qc_dir}/${sample}.fastp.html" \
         --json "${qc_dir}/${sample}.fastp.json" \
         ${FASTP_EXTRA_ARGS:-} \
-        > "${log_dir}/${sample}.fastp.log" 2>&1
+        > "${log_dir}/${sample}.fastp.log" 2>&1; then
+        echo "ERROR: ${sample}: fastp failed" >&2
+        echo "ERROR: fastp log: ${log_dir}/${sample}.fastp.log" >&2
+        tail -n 40 "${log_dir}/${sample}.fastp.log" >&2 || true
+        exit 1
+      fi
     else
       log_msg "${sample}: trimmed FASTQ exists, skipping fastp"
     fi
@@ -382,6 +408,14 @@ TECH_MANIFEST="${TMPDIR}/microc2tracks.technical_replicates.$$.tsv"
 : > "${TECH_MANIFEST}"
 
 tail -n +2 "${SAMPLESHEET}" | while IFS=, read -r sample assay condition biological_replicate technical_replicate fastq_r1 fastq_r2 rest; do
+  sample="$(clean_csv_field "${sample}")"
+  assay="$(clean_csv_field "${assay}")"
+  condition="$(clean_csv_field "${condition}")"
+  biological_replicate="$(clean_csv_field "${biological_replicate}")"
+  technical_replicate="$(clean_csv_field "${technical_replicate}")"
+  fastq_r1="$(clean_csv_field "${fastq_r1}")"
+  fastq_r2="$(clean_csv_field "${fastq_r2}")"
+
   [ -n "${sample// }" ] || continue
   process_sample "${sample}" "${assay}" "${fastq_r1}" "${fastq_r2}"
   assay_group="$(printf '%s' "${assay}" | tr '[:upper:]' '[:lower:]')"

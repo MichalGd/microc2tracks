@@ -1,5 +1,31 @@
 # Troubleshooting
 
+## `fastp` Says `Failed to open file` But `ls` Shows The FASTQ Exists
+
+Most likely cause: the sample sheet has hidden Windows CRLF line endings, so the last CSV field may be passed to Bash with an invisible carriage return. The file name looks correct on screen, but `fastp` receives a different path.
+
+Check for hidden carriage returns:
+
+```bash
+cd /path/to/project
+sed -n '1,5l' config/samplesheet.csv
+```
+
+If lines end with `\r$`, current versions of `microc2tracks-preflight` and `microc2tracks` fix this automatically at startup. You can also convert the sample sheet manually:
+
+```bash
+sed -i 's/\r$//' config/samplesheet.csv
+```
+
+Then rerun preflight and the workflow:
+
+```bash
+microc2tracks-preflight -c config/config.conf -s config/samplesheet.csv
+microc2tracks -c config/config.conf -s config/samplesheet.csv
+```
+
+Current versions also normalize the config and sample sheet in place before parsing. The automatic cleanup removes CRLF/CR line endings, UTF-8 byte-order marks, non-breaking spaces, copied smart quotes, and surrounding whitespace around sample-sheet fields.
+
 ## Empty Cooler: `nnz: 0`, `sum: 0`
 
 Most likely cause: chromosome names in `.pairs.gz` do not match `CHROM_SIZES`.
