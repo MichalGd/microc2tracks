@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import csv
+import gzip
 import os
 import sys
 from pathlib import Path
@@ -19,6 +20,7 @@ REQUIRED_COLUMNS = [
     "fastq_r2",
 ]
 VALID_ASSAYS = {"microc", "hic"}
+GZIP_SUFFIXES = {".gz", ".gzip"}
 
 
 def fail(message: str) -> None:
@@ -26,18 +28,46 @@ def fail(message: str) -> None:
     raise SystemExit(1)
 
 
+def format_bytes(size: int) -> str:
+    value = float(size)
+    for unit in ["B", "KiB", "MiB", "GiB", "TiB"]:
+        if value < 1024 or unit == "TiB":
+            return f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{size} B"
+
+
+def check_gzip(path: Path, label: str, line_number: int, errors: list[str]) -> None:
+    if path.suffix.lower() not in GZIP_SUFFIXES:
+        return
+
+    try:
+        with gzip.open(path, "rb") as handle:
+            while handle.read(1024 * 1024):
+                pass
+    except (EOFError, OSError) as exc:
+        errors.append(f"line {line_number}: {label} gzip integrity failed for {path}: {exc}")
+
+
 def main() -> None:
-    require_files = False
-    args = sys.argv[1:]
+    import argparse
 
-    if "--require-files" in args:
-        require_files = True
-        args.remove("--require-files")
+    parser = argparse.ArgumentParser(description="Validate the microc2tracks sample sheet.")
+    parser.add_argument("--require-files", action="store_true")
+    parser.add_argument(
+        "--summarize-files",
+        action="store_true",
+        help="print FASTQ sizes for every sample-sheet row",
+    )
+    parser.add_argument(
+        "--check-gzip",
+        action="store_true",
+        help="read each .gz FASTQ to verify gzip integrity; this can take time for large inputs",
+    )
+    parser.add_argument("samplesheet")
+    args = parser.parse_args()
 
-    if len(args) != 1:
-        fail("Usage: validate_samplesheet.py [--require-files] config/samplesheet.csv")
-
-    sheet = Path(args[0])
+    sheet = Path(args.samplesheet)
     if not sheet.exists():
         fail(f"Sample sheet does not exist: {sheet}")
 
@@ -53,6 +83,7 @@ def main() -> None:
 
         seen_samples: set[str] = set()
         seen_technical_replicates: set[tuple[str, str, str, str]] = set()
+        file_summaries: list[tuple[str, str, Path, int]] = []
         rows = 0
         errors: list[str] = []
 
@@ -110,7 +141,7 @@ def main() -> None:
                 path = Path(value)
                 if not path.exists():
                     message = f"line {line_number}: {label} path not found: {value}"
-                    if require_files:
+                    if args.require_files:
                         errors.append(message)
                     else:
                         print(f"WARNING: {message}", file=sys.stderr)
@@ -118,6 +149,10 @@ def main() -> None:
                     errors.append(f"line {line_number}: {label} is not a regular file: {value}")
                 elif not os.access(path, os.R_OK):
                     errors.append(f"line {line_number}: {label} is not readable: {value}")
+                else:
+                    file_summaries.append((sample, label, path, path.stat().st_size))
+                    if args.check_gzip:
+                        check_gzip(path, label, line_number, errors)
 
         if rows == 0:
             fail("Sample sheet has no data rows")
@@ -128,6 +163,14 @@ def main() -> None:
             raise SystemExit(1)
 
     print(f"OK: {sheet} has {rows} sample row(s)")
+
+    if args.summarize_files and file_summaries:
+        print("FASTQ input summary:")
+        for sample, label, path, size in file_summaries:
+            print(f"  {sample} {label}: {format_bytes(size)} ({size} bytes) {path}")
+
+    if args.check_gzip:
+        print("FASTQ gzip integrity check finished")
 
 
 if __name__ == "__main__":

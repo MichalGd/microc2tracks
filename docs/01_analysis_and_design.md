@@ -92,6 +92,8 @@ The central abstraction is a filtered, deduplicated, indexed `.pairs.gz` file. O
 
 The sample sheet separates biological and technical replicates. Each row is one technical replicate and is processed to its own `.mcool` and `.hic`; after all rows finish, rows with matching assay, condition, and biological replicate are merged as technical replicates and matrices are rebuilt from the merged pair file.
 
+Sample workers can run in parallel with `MAX_PARALLEL_SAMPLES`, while matrix and `.hic` sections use separate semaphores so memory-heavy steps can remain serialized. The run ends with a compact TSV/HTML report and global MultiQC report, then optional cleanup of reproducible large intermediates.
+
 ## Default Pipeline Path
 
 ```text

@@ -6,7 +6,6 @@ dependencies:
   - python>=3.10,<3.13
   - cooltools
   - hictk
-  - mustache-hic
   - chromosight
   - coolpuppy
   - hicexplorer
@@ -15,3 +14,7 @@ dependencies:
   - numpy
   - scipy
   - matplotlib
+  - setuptools<81
+  - pip
+  - pip:
+      - mustache-hic

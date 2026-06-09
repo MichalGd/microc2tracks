@@ -17,6 +17,7 @@ microc2tracks/
     05_tool_strategy.md
     06_troubleshooting.md
     07_github_setup.md
+    08_light_downstream_analysis.md
   envs/
     downstream_optional.yml
   examples/
@@ -30,7 +31,10 @@ microc2tracks/
     preflight_check.sh
     prepare_reference.sh
     run_downstream.sh
+    call_tads_from_insulation.py
+    export_insulation_bedgraph.py
     sanitize_text_inputs.py
+    summarize_run.py
     validate_samplesheet.py
   tests/
     check_bash_syntax.sh

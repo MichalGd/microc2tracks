@@ -206,18 +206,22 @@ conda create -p /opt/conda/envs/microc2tracks-core -c conda-forge -c bioconda \
   pandas numpy matplotlib bioframe
 
 # Downstream environment
-conda create -p /opt/conda/envs/microc2tracks-downstream -c conda-forge -c bioconda \
-  python cooltools hictk mustache-hic chromosight coolpuppy hicexplorer \
-  pandas numpy matplotlib bioframe
-```
-
-The optional downstream environment can also be created from the repository:
-
-```bash
 conda env create \
   -p /opt/conda/envs/microc2tracks-downstream \
   -f envs/downstream_optional.yml
 ```
+
+If `mamba` is available, prefer it for the optional downstream environment:
+
+```bash
+mamba env create \
+  -p /opt/conda/envs/microc2tracks-downstream \
+  -f envs/downstream_optional.yml
+```
+
+The downstream YAML installs Mustache through `pip` because `mustache-hic` is
+not a conda package on the standard `conda-forge`/`bioconda` channels. It also
+pins `setuptools<81` for `coolpuppy`/`h5sparse` compatibility.
 
 ## Permissions
 

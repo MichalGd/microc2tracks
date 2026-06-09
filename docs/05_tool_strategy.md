@@ -17,8 +17,8 @@
 
 | Output | Default | Notes |
 |---|---|---|
-| Insulation/TADs | `cooltools insulation` | Recommended first-line TAD/boundary method. |
-| Compartments | `cooltools eigs-cis` | Requires a phasing track for confident A/B orientation. |
+| Insulation/TADs | `cooltools insulation`, `scripts/export_insulation_bedgraph.py`, and `scripts/call_tads_from_insulation.py` | Recommended first-line boundary method plus browser-ready insulation tracks and TAD-like BED intervals. |
+| Compartments | `cooltools eigs-cis` | Runs by default; a phasing track is needed for confident A/B orientation. |
 | Saddle plots | `cooltools saddle` | Uses compartment eigenvectors and expected contacts. |
 | Loops | `cooltools dots`, Mustache | CPU-friendly alternatives to GPU-heavy HiCCUPS. |
 | Loop anchors | derive from loop BEDPE/TSV | Anchor extraction can be added after choosing the loop caller. |

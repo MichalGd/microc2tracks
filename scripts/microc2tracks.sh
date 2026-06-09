@@ -50,6 +50,95 @@ clean_csv_field() {
     | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//'
 }
 
+is_positive_int() {
+  [[ "${1:-}" =~ ^[1-9][0-9]*$ ]]
+}
+
+is_nonnegative_int() {
+  [[ "${1:-}" =~ ^[0-9]+$ ]]
+}
+
+require_positive_int() {
+  local name="$1"
+  local value="$2"
+  is_positive_int "${value}" || die "${name} must be a positive integer, got '${value}'"
+}
+
+acquire_slot() {
+  local name="$1"
+  local limit="$2"
+  local lock_dir="${LOCK_ROOT}/${name}"
+  local slot
+
+  mkdir -p "${lock_dir}"
+
+  while true; do
+    for slot in $(seq 1 "${limit}"); do
+      if mkdir "${lock_dir}/slot_${slot}" 2>/dev/null; then
+        printf '%s\n' "${lock_dir}/slot_${slot}"
+        return 0
+      fi
+    done
+    sleep "${LOCK_POLL_SECONDS:-5}"
+  done
+}
+
+run_with_slot() {
+  local name="$1"
+  local limit="$2"
+  shift 2
+
+  require_positive_int "MAX_PARALLEL_${name}" "${limit}"
+
+  local slot_dir
+  slot_dir="$(acquire_slot "${name}" "${limit}")"
+
+  (
+    trap 'rmdir "${slot_dir}" 2>/dev/null || true' EXIT
+    "$@"
+  )
+}
+
+outputs_complete() {
+  local path
+
+  for path in "$@"; do
+    [ -s "${path}" ] || return 1
+  done
+
+  return 0
+}
+
+mark_done() {
+  local done_file="$1"
+  local step="$2"
+  shift 2
+
+  mkdir -p "$(dirname "${done_file}")"
+  {
+    printf 'step\t%s\n' "${step}"
+    printf 'completed_at\t%s\n' "$(date '+%Y-%m-%d %H:%M:%S')"
+    printf 'config\t%s\n' "${CONFIG}"
+    printf 'outputs\t%s\n' "$*"
+  } > "${done_file}.tmp.$$"
+  mv -f "${done_file}.tmp.$$" "${done_file}"
+}
+
+step_done() {
+  local done_file="$1"
+  local step="$2"
+  shift 2
+
+  if outputs_complete "$@"; then
+    if [ ! -s "${done_file}" ] && bool_true "${BOOTSTRAP_SENTINELS:-true}"; then
+      mark_done "${done_file}" "${step}" "$@"
+    fi
+    return 0
+  fi
+
+  return 1
+}
+
 write_ucsc_hic_track() {
   local sample="$1"
   local hic_path="$2"
@@ -132,6 +221,38 @@ source "${CONFIG}"
 [ -f "${REFERENCE_FASTA}" ] || die "REFERENCE_FASTA not found: ${REFERENCE_FASTA}"
 [ -f "${CHROM_SIZES}" ] || die "CHROM_SIZES not found: ${CHROM_SIZES}"
 BWA_INDEX_PREFIX="${BWA_INDEX_PREFIX:-$REFERENCE_FASTA}"
+THREADS_FASTP="${THREADS_FASTP:-${THREADS_ALIGN:-1}}"
+THREADS_HIC_NORM="${THREADS_HIC_NORM:-24}"
+MCOOL_RESOLUTIONS="${MCOOL_RESOLUTIONS:-${RESOLUTIONS}}"
+HIC_RESOLUTIONS="${HIC_RESOLUTIONS:-${RESOLUTIONS}}"
+HIC_NORMALIZATIONS="${HIC_NORMALIZATIONS:-VC,VC_SQRT,KR,SCALE}"
+BOOTSTRAP_SENTINELS="${BOOTSTRAP_SENTINELS:-true}"
+
+MAX_PARALLEL_SAMPLES="${MAX_PARALLEL_SAMPLES:-1}"
+MAX_PARALLEL_MATRIX="${MAX_PARALLEL_MATRIX:-1}"
+MAX_PARALLEL_HIC="${MAX_PARALLEL_HIC:-1}"
+LOCK_POLL_SECONDS="${LOCK_POLL_SECONDS:-5}"
+
+require_positive_int "MAX_PARALLEL_SAMPLES" "${MAX_PARALLEL_SAMPLES}"
+require_positive_int "MAX_PARALLEL_MATRIX" "${MAX_PARALLEL_MATRIX}"
+require_positive_int "MAX_PARALLEL_HIC" "${MAX_PARALLEL_HIC}"
+require_positive_int "LOCK_POLL_SECONDS" "${LOCK_POLL_SECONDS}"
+require_positive_int "THREADS_FASTP" "${THREADS_FASTP}"
+require_positive_int "THREADS_ALIGN" "${THREADS_ALIGN}"
+require_positive_int "THREADS_SORT" "${THREADS_SORT}"
+require_positive_int "THREADS_MATRIX" "${THREADS_MATRIX}"
+require_positive_int "THREADS_HIC_NORM" "${THREADS_HIC_NORM}"
+
+FASTP_TIMEOUT_SECONDS="${FASTP_TIMEOUT_SECONDS:-0}"
+is_nonnegative_int "${FASTP_TIMEOUT_SECONDS}" || die "FASTP_TIMEOUT_SECONDS must be a non-negative integer, got '${FASTP_TIMEOUT_SECONDS}'"
+
+if [ "${FASTP_TIMEOUT_SECONDS}" -gt 0 ] && ! command -v timeout >/dev/null 2>&1; then
+  die "FASTP_TIMEOUT_SECONDS is set but GNU/coreutils timeout was not found"
+fi
+
+PIPELINE_RUN_ID="$(date '+%Y%m%d_%H%M%S')_$$"
+LOCK_ROOT="${TMPDIR}/microc2tracks_locks/${PIPELINE_RUN_ID}"
+mkdir -p "${LOCK_ROOT}"
 
 python "${SCRIPT_DIR}/validate_samplesheet.py" --require-files "${SAMPLESHEET}"
 
@@ -191,6 +312,172 @@ merge_technical_replicate_groups() {
   done
 }
 
+build_cool_mcool_products() {
+  local sample="$1"
+  local pairs="$2"
+  local log_dir="$3"
+  local matrix_chrom_sizes="$4"
+  local raw_cool="$5"
+  local norm_cool="$6"
+  local raw_mcool="$7"
+  local norm_mcool="$8"
+  local done_dir="$9"
+  local matrix_dir
+  local raw_cool_done="${done_dir}/raw_cool.done"
+  local norm_cool_done="${done_dir}/norm_cool.done"
+  local raw_mcool_done="${done_dir}/raw_mcool.done"
+  local norm_mcool_done="${done_dir}/norm_mcool.done"
+  local tmp
+
+  matrix_dir="$(dirname "${raw_cool}")"
+
+  if bool_true "${RUN_MCOOL:-true}" \
+    && ! bool_true "${KEEP_SINGLE_RES_COOL:-false}" \
+    && ! bool_true "${KEEP_RAW_MCOOL:-false}" \
+    && step_done "${norm_mcool_done}" "${sample}:norm_mcool" "${norm_mcool}"; then
+    log_msg "${sample}: normalized mcool exists, skipping cooler/mcool rebuild"
+    return 0
+  fi
+
+  if step_done "${raw_cool_done}" "${sample}:raw_cool" "${raw_cool}"; then
+    log_msg "${sample}: raw cooler exists, skipping"
+  else
+    log_msg "${sample}: building raw cooler"
+    tmp="${raw_cool}.tmp.$$"
+    rm -f "${tmp}"
+    cooler cload pairix --assembly "${GENOME_ASSEMBLY}" \
+      -p "${THREADS_MATRIX}" \
+      "${matrix_chrom_sizes}:${BASE_RESOLUTION}" \
+      "${pairs}" \
+      "${tmp}" \
+      > "${log_dir}/${sample}.cooler_cload.log" 2>&1
+    mv -f "${tmp}" "${raw_cool}"
+    mark_done "${raw_cool_done}" "${sample}:raw_cool" "${raw_cool}"
+  fi
+
+  if step_done "${norm_cool_done}" "${sample}:norm_cool" "${norm_cool}"; then
+    log_msg "${sample}: normalized cooler exists, skipping"
+  else
+    log_msg "${sample}: balancing single-resolution cooler"
+    tmp="${norm_cool}.tmp.$$"
+    rm -f "${tmp}"
+    cp "${raw_cool}" "${tmp}"
+    cooler balance -p "${THREADS_MATRIX}" -f "${tmp}" \
+      > "${log_dir}/${sample}.cooler_balance.log" 2>&1
+    mv -f "${tmp}" "${norm_cool}"
+    mark_done "${norm_cool_done}" "${sample}:norm_cool" "${norm_cool}"
+  fi
+
+  if bool_true "${RUN_MCOOL:-true}"; then
+    if step_done "${raw_mcool_done}" "${sample}:raw_mcool" "${raw_mcool}"; then
+      log_msg "${sample}: raw mcool exists, skipping"
+    else
+      log_msg "${sample}: building raw mcool"
+      tmp="${raw_mcool}.tmp.$$"
+      rm -f "${tmp}"
+      cooler zoomify -p "${THREADS_MATRIX}" \
+        -r "${MCOOL_RESOLUTIONS}" \
+        -o "${tmp}" \
+        "${raw_cool}" \
+        > "${log_dir}/${sample}.cooler_zoomify_raw.log" 2>&1
+      mv -f "${tmp}" "${raw_mcool}"
+      mark_done "${raw_mcool_done}" "${sample}:raw_mcool" "${raw_mcool}"
+    fi
+
+    if step_done "${norm_mcool_done}" "${sample}:norm_mcool" "${norm_mcool}"; then
+      log_msg "${sample}: normalized mcool exists, skipping"
+    else
+      log_msg "${sample}: building balanced mcool"
+      tmp="${norm_mcool}.tmp.$$"
+      rm -f "${tmp}"
+      cooler zoomify -p "${THREADS_MATRIX}" \
+        -r "${MCOOL_RESOLUTIONS}" \
+        --balance \
+        -o "${tmp}" \
+        "${raw_cool}" \
+        > "${log_dir}/${sample}.cooler_zoomify_norm.log" 2>&1
+      mv -f "${tmp}" "${norm_mcool}"
+      mark_done "${norm_mcool_done}" "${sample}:norm_mcool" "${norm_mcool}"
+    fi
+  fi
+
+  if [ -s "${raw_cool}" ]; then
+    cooler info "${raw_cool}" > "${matrix_dir}/${sample}.raw.${BASE_RESOLUTION}.cool.info.json"
+  fi
+}
+
+build_hic_products() {
+  local sample="$1"
+  local pairs="$2"
+  local matrix_dir="$3"
+  local pairs_dir="$4"
+  local log_dir="$5"
+  local matrix_chrom_sizes="$6"
+  local juicer_pairs="$7"
+  local raw_hic="$8"
+  local norm_hic="$9"
+  local done_dir="${10}"
+  local juicer_pairs_done="${done_dir}/juicer_pairs.done"
+  local raw_hic_done="${done_dir}/raw_hic.done"
+  local norm_hic_done="${done_dir}/norm_hic.done"
+  local tmp
+
+  if bool_true "${RUN_HIC:-true}"; then
+    [ -f "${JUICER_TOOLS_JAR}" ] || die "JUICER_TOOLS_JAR not found: ${JUICER_TOOLS_JAR}"
+
+    if step_done "${norm_hic_done}" "${sample}:norm_hic" "${norm_hic}"; then
+      log_msg "${sample}: normalized hic exists, skipping hic generation"
+      write_ucsc_hic_track "${sample}" "${norm_hic}" "${matrix_dir}"
+      return 0
+    fi
+
+    if step_done "${juicer_pairs_done}" "${sample}:juicer_pairs" "${juicer_pairs}"; then
+      log_msg "${sample}: Juicer-compatible pairs exist, skipping"
+    else
+      log_msg "${sample}: writing Juicer-compatible pairs"
+      tmp="${juicer_pairs}.tmp.$$"
+      rm -f "${tmp}"
+      zcat "${pairs}" \
+        | awk 'BEGIN{OFS="\t"} /^## pairs format/ {print; next} /^#columns:/ {print; next} /^#/ {next} {print}' \
+        | bgzip -@ "${THREADS_MATRIX}" \
+        > "${tmp}"
+      mv -f "${tmp}" "${juicer_pairs}"
+      mark_done "${juicer_pairs_done}" "${sample}:juicer_pairs" "${juicer_pairs}"
+    fi
+
+    if step_done "${raw_hic_done}" "${sample}:raw_hic" "${raw_hic}"; then
+      log_msg "${sample}: raw hic exists, skipping"
+    else
+      log_msg "${sample}: building raw hic"
+      tmp="${raw_hic}.tmp.$$"
+      rm -f "${tmp}"
+      java -Xmx"${JAVA_HEAP}" -jar "${JUICER_TOOLS_JAR}" pre \
+        -n \
+        -r "${HIC_RESOLUTIONS}" \
+        "${juicer_pairs}" \
+        "${tmp}" \
+        "${matrix_chrom_sizes}" \
+        > "${log_dir}/${sample}.juicer_pre.log" 2>&1
+      mv -f "${tmp}" "${raw_hic}"
+      mark_done "${raw_hic_done}" "${sample}:raw_hic" "${raw_hic}"
+    fi
+
+    log_msg "${sample}: adding Juicer normalizations"
+    tmp="${norm_hic}.tmp.$$"
+    rm -f "${tmp}"
+    cp "${raw_hic}" "${tmp}"
+    java -Xmx"${JAVA_HEAP}" -jar "${JUICER_TOOLS_JAR}" addNorm \
+      -j "${THREADS_HIC_NORM}" \
+      -k "${HIC_NORMALIZATIONS}" \
+      "${tmp}" \
+      > "${log_dir}/${sample}.juicer_addNorm.log" 2>&1
+    mv -f "${tmp}" "${norm_hic}"
+    mark_done "${norm_hic_done}" "${sample}:norm_hic" "${norm_hic}"
+
+    write_ucsc_hic_track "${sample}" "${norm_hic}" "${matrix_dir}"
+  fi
+}
+
 build_matrices_from_pairs() {
   local sample="$1"
   local pairs="$2"
@@ -199,101 +486,201 @@ build_matrices_from_pairs() {
   local matrix_chrom_sizes="$5"
 
   local matrix_dir="${sample_dir}/04_matrices"
+  local pairs_dir="${sample_dir}/03_pairs"
   local raw_cool="${matrix_dir}/${sample}.raw.${BASE_RESOLUTION}.cool"
   local norm_cool="${matrix_dir}/${sample}.norm.${BASE_RESOLUTION}.cool"
   local raw_mcool="${matrix_dir}/${sample}.raw.mcool"
   local norm_mcool="${matrix_dir}/${sample}.norm.mcool"
-  local juicer_pairs="${sample_dir}/03_pairs/${sample}.valid.mapq${MAPQ_THRESHOLD}.juicer.pairs.gz"
+  local juicer_pairs="${pairs_dir}/${sample}.valid.mapq${MAPQ_THRESHOLD}.juicer.pairs.gz"
   local raw_hic="${matrix_dir}/${sample}.raw.hic"
   local norm_hic="${matrix_dir}/${sample}.norm.hic"
+  local done_dir="${log_dir}/done"
 
   mkdir -p "${matrix_dir}"
 
-  if [ ! -s "${raw_cool}" ]; then
-    log_msg "${sample}: building raw cooler"
-    cooler cload pairix --assembly "${GENOME_ASSEMBLY}" \
-      -p "${THREADS_MATRIX}" \
-      "${matrix_chrom_sizes}:${BASE_RESOLUTION}" \
-      "${pairs}" \
-      "${raw_cool}" \
-      > "${log_dir}/${sample}.cooler_cload.log" 2>&1
+  run_with_slot matrix "${MAX_PARALLEL_MATRIX}" \
+    build_cool_mcool_products \
+      "${sample}" "${pairs}" "${log_dir}" "${matrix_chrom_sizes}" \
+      "${raw_cool}" "${norm_cool}" "${raw_mcool}" "${norm_mcool}" "${done_dir}"
+
+  run_with_slot hic "${MAX_PARALLEL_HIC}" \
+    build_hic_products \
+      "${sample}" "${pairs}" "${matrix_dir}" "${pairs_dir}" "${log_dir}" \
+      "${matrix_chrom_sizes}" "${juicer_pairs}" "${raw_hic}" "${norm_hic}" "${done_dir}"
+}
+
+cleanup_sample_intermediates() {
+  local sample="$1"
+  local trim_r1="$2"
+  local trim_r2="$3"
+  local dedup_pairs="$4"
+  local juicer_pairs="$5"
+  local raw_cool="$6"
+  local norm_cool="$7"
+  local raw_mcool="$8"
+  local raw_hic="$9"
+  local sample_tmp="${10}"
+
+  if bool_true "${RUN_FASTP:-true}" && ! bool_true "${KEEP_TRIMMED_FASTQ:-false}"; then
+    log_msg "${sample}: removing trimmed FASTQ intermediates"
+    rm -f "${trim_r1}" "${trim_r2}"
+  fi
+
+  if ! bool_true "${KEEP_DEDUP_PAIRS:-true}"; then
+    log_msg "${sample}: removing deduplicated pair intermediates"
+    rm -f "${dedup_pairs}" "${dedup_pairs}.px2"
+  fi
+
+  if ! bool_true "${KEEP_JUICER_PAIRS:-false}"; then
+    rm -f "${juicer_pairs}"
+  fi
+
+  if ! bool_true "${KEEP_SINGLE_RES_COOL:-false}"; then
+    rm -f "${raw_cool}" "${norm_cool}"
+  fi
+
+  if ! bool_true "${KEEP_RAW_MCOOL:-false}"; then
+    rm -f "${raw_mcool}"
+  fi
+
+  if ! bool_true "${KEEP_RAW_HIC:-false}"; then
+    rm -f "${raw_hic}"
+  fi
+
+  if bool_true "${CLEAN_TMP_ON_SUCCESS:-true}"; then
+    rm -rf "${sample_tmp}"
+  fi
+}
+
+generate_final_report() {
+  local report_dir="${OUTDIR}/final_report"
+
+  mkdir -p "${report_dir}"
+
+  if bool_true "${RUN_GLOBAL_MULTIQC:-true}"; then
+    log_msg "Generating global MultiQC report"
+    multiqc "${OUTDIR}" -n "microc2tracks_multiqc.html" -o "${report_dir}" \
+      > "${report_dir}/microc2tracks_multiqc.log" 2>&1 || true
+  fi
+
+  if bool_true "${RUN_FINAL_REPORT:-true}"; then
+    log_msg "Generating microc2tracks final summary report"
+    python "${SCRIPT_DIR}/summarize_run.py" \
+      -c "${CONFIG}" \
+      -s "${SAMPLESHEET}" \
+      -o "${report_dir}" \
+      --sample-manifest "${SAMPLE_MANIFEST}" \
+      --technical-manifest "${TECH_MANIFEST}"
+  fi
+}
+
+run_prelim_downstream() {
+  local sample="$1"
+  local matrix="$2"
+  local log_dir="$3"
+  local done_dir="$4"
+  local done_file="${done_dir}/prelim_downstream.done"
+
+  if ! bool_true "${RUN_PRELIM_DOWNSTREAM:-true}"; then
+    return 0
+  fi
+
+  if [ -s "${done_file}" ]; then
+    log_msg "${sample}: preliminary downstream already marked complete, skipping"
+    return 0
+  fi
+
+  if [ ! -s "${matrix}" ]; then
+    log_msg "${sample}: normalized mcool not found; skipping preliminary downstream"
+    return 0
+  fi
+
+  log_msg "${sample}: running preliminary downstream analyses"
+  bash "${SCRIPT_DIR}/run_downstream.sh" \
+    -l \
+    -c "${CONFIG}" \
+    -s "${sample}" \
+    -m "${matrix}" \
+    > "${log_dir}/${sample}.prelim_downstream.log" 2>&1 || true
+  mark_done "${done_file}" "${sample}:prelim_downstream" "${matrix}"
+}
+
+fastq_file_summary() {
+  local path="$1"
+
+  if stat -c '%s bytes, mtime=%y' "${path}" 2>/dev/null; then
+    return 0
+  fi
+
+  ls -lh "${path}" 2>/dev/null || printf 'metadata unavailable'
+}
+
+run_fastp_step() {
+  local sample="$1"
+  local fastq_r1="$2"
+  local fastq_r2="$3"
+  local trim_r1="$4"
+  local trim_r2="$5"
+  local qc_dir="$6"
+  local log_dir="$7"
+  local fastp_log="${log_dir}/${sample}.fastp.log"
+  local tmp_trim_r1="${trim_r1}.tmp.$$"
+  local tmp_trim_r2="${trim_r2}.tmp.$$"
+  local fastp_html="${qc_dir}/${sample}.fastp.html"
+  local fastp_json="${qc_dir}/${sample}.fastp.json"
+  local tmp_html="${fastp_html}.tmp.$$"
+  local tmp_json="${fastp_json}.tmp.$$"
+  local status
+
+  log_msg "${sample}: fastq_r1 ${fastq_r1} ($(fastq_file_summary "${fastq_r1}"))"
+  log_msg "${sample}: fastq_r2 ${fastq_r2} ($(fastq_file_summary "${fastq_r2}"))"
+  rm -f "${tmp_trim_r1}" "${tmp_trim_r2}" "${tmp_html}" "${tmp_json}"
+
+  set +e
+  if [ "${FASTP_TIMEOUT_SECONDS}" -gt 0 ]; then
+    timeout "${FASTP_TIMEOUT_SECONDS}" fastp \
+      -i "${fastq_r1}" \
+      -I "${fastq_r2}" \
+      -o "${tmp_trim_r1}" \
+      -O "${tmp_trim_r2}" \
+      --thread "${THREADS_FASTP}" \
+      --html "${tmp_html}" \
+      --json "${tmp_json}" \
+      ${FASTP_EXTRA_ARGS:-} \
+      > "${fastp_log}" 2>&1
   else
-    log_msg "${sample}: raw cooler exists, skipping"
+    fastp \
+      -i "${fastq_r1}" \
+      -I "${fastq_r2}" \
+      -o "${tmp_trim_r1}" \
+      -O "${tmp_trim_r2}" \
+      --thread "${THREADS_FASTP}" \
+      --html "${tmp_html}" \
+      --json "${tmp_json}" \
+      ${FASTP_EXTRA_ARGS:-} \
+      > "${fastp_log}" 2>&1
+  fi
+  status="$?"
+  set -e
+
+  if [ "${status}" -ne 0 ]; then
+    echo "ERROR: ${sample}: fastp failed with exit code ${status}" >&2
+    if [ "${status}" -eq 124 ]; then
+      echo "ERROR: ${sample}: fastp exceeded FASTP_TIMEOUT_SECONDS=${FASTP_TIMEOUT_SECONDS}" >&2
+    fi
+    echo "ERROR: fastp log: ${fastp_log}" >&2
+    tail -n 40 "${fastp_log}" >&2 || true
+    rm -f "${tmp_trim_r1}" "${tmp_trim_r2}" "${tmp_html}" "${tmp_json}"
+    return "${status}"
   fi
 
-  if [ ! -s "${norm_cool}" ]; then
-    log_msg "${sample}: balancing single-resolution cooler"
-    cp "${raw_cool}" "${norm_cool}"
-    cooler balance -p "${THREADS_MATRIX}" -f "${norm_cool}" \
-      > "${log_dir}/${sample}.cooler_balance.log" 2>&1
-  else
-    log_msg "${sample}: normalized cooler exists, skipping"
-  fi
+  mv -f "${tmp_trim_r1}" "${trim_r1}"
+  mv -f "${tmp_trim_r2}" "${trim_r2}"
+  mv -f "${tmp_html}" "${fastp_html}"
+  mv -f "${tmp_json}" "${fastp_json}"
 
-  if bool_true "${RUN_MCOOL:-true}"; then
-    if [ ! -s "${raw_mcool}" ]; then
-      log_msg "${sample}: building raw mcool"
-      cooler zoomify -p "${THREADS_MATRIX}" \
-        -r "${RESOLUTIONS}" \
-        -o "${raw_mcool}" \
-        "${raw_cool}" \
-        > "${log_dir}/${sample}.cooler_zoomify_raw.log" 2>&1
-    else
-      log_msg "${sample}: raw mcool exists, skipping"
-    fi
-
-    if [ ! -s "${norm_mcool}" ]; then
-      log_msg "${sample}: building balanced mcool"
-      cooler zoomify -p "${THREADS_MATRIX}" \
-        -r "${RESOLUTIONS}" \
-        --balance \
-        -o "${norm_mcool}" \
-        "${raw_cool}" \
-        > "${log_dir}/${sample}.cooler_zoomify_norm.log" 2>&1
-    else
-      log_msg "${sample}: normalized mcool exists, skipping"
-    fi
-  fi
-
-  cooler info "${raw_cool}" > "${matrix_dir}/${sample}.raw.${BASE_RESOLUTION}.cool.info.json"
-
-  if bool_true "${RUN_HIC:-true}"; then
-    [ -f "${JUICER_TOOLS_JAR}" ] || die "JUICER_TOOLS_JAR not found: ${JUICER_TOOLS_JAR}"
-
-    if [ ! -s "${juicer_pairs}" ]; then
-      log_msg "${sample}: writing Juicer-compatible pairs"
-      zcat "${pairs}" \
-        | awk 'BEGIN{OFS="\t"} /^## pairs format/ {print; next} /^#columns:/ {print; next} /^#/ {next} {print}' \
-        | bgzip -@ "${THREADS_MATRIX}" \
-        > "${juicer_pairs}"
-    fi
-
-    if [ ! -s "${raw_hic}" ]; then
-      log_msg "${sample}: building raw hic"
-      java -Xmx"${JAVA_HEAP}" -jar "${JUICER_TOOLS_JAR}" pre \
-        -n \
-        -r "${RESOLUTIONS}" \
-        "${juicer_pairs}" \
-        "${raw_hic}" \
-        "${matrix_chrom_sizes}" \
-        > "${log_dir}/${sample}.juicer_pre.log" 2>&1
-    else
-      log_msg "${sample}: raw hic exists, skipping"
-    fi
-
-    if [ ! -s "${norm_hic}" ]; then
-      log_msg "${sample}: adding Juicer normalizations"
-      cp "${raw_hic}" "${norm_hic}"
-      java -Xmx"${JAVA_HEAP}" -jar "${JUICER_TOOLS_JAR}" addNorm \
-        -k VC,VC_SQRT,KR,SCALE \
-        "${norm_hic}" \
-        > "${log_dir}/${sample}.juicer_addNorm.log" 2>&1
-    else
-      log_msg "${sample}: normalized hic exists, skipping"
-    fi
-
-    write_ucsc_hic_track "${sample}" "${norm_hic}" "${matrix_dir}"
-  fi
+  log_msg "${sample}: fastp finished; trimmed R1 $(fastq_file_summary "${trim_r1}")"
+  log_msg "${sample}: fastp finished; trimmed R2 $(fastq_file_summary "${trim_r2}")"
 }
 
 process_sample() {
@@ -315,41 +702,55 @@ process_sample() {
   local dedup_pairs="${pairs_dir}/${sample}.dedup.pairs.gz"
   local valid_pairs="${pairs_dir}/${sample}.valid.mapq${MAPQ_THRESHOLD}.pairs.gz"
   local matrix_chrom_sizes="${pairs_dir}/${sample}.matrix.chrom.sizes"
+  local raw_cool="${sample_dir}/04_matrices/${sample}.raw.${BASE_RESOLUTION}.cool"
+  local norm_cool="${sample_dir}/04_matrices/${sample}.norm.${BASE_RESOLUTION}.cool"
+  local raw_mcool="${sample_dir}/04_matrices/${sample}.raw.mcool"
+  local norm_mcool="${sample_dir}/04_matrices/${sample}.norm.mcool"
+  local juicer_pairs="${pairs_dir}/${sample}.valid.mapq${MAPQ_THRESHOLD}.juicer.pairs.gz"
+  local raw_hic="${sample_dir}/04_matrices/${sample}.raw.hic"
+  local status_file="${log_dir}/${sample}.status.tsv"
+  local done_dir="${log_dir}/done"
+  local fastp_done="${done_dir}/fastp.done"
+  local dedup_done="${done_dir}/dedup_pairs.done"
+  local dedup_index_done="${done_dir}/dedup_pairix.done"
+  local valid_done="${done_dir}/valid_pairs.done"
+  local valid_index_done="${done_dir}/valid_pairix.done"
+  local stats_done="${done_dir}/pairs_stats.done"
+  local sample_start_epoch
+  local sample_end_epoch
   local select_expr
+  local tmp_pairs
+  local tmp_stats
 
-  mkdir -p "${qc_dir}" "${trimmed_dir}" "${pairs_dir}" "${log_dir}" "${sample_tmp}"
+  mkdir -p "${qc_dir}" "${trimmed_dir}" "${pairs_dir}" "${log_dir}" "${done_dir}" "${sample_tmp}"
+  sample_start_epoch="$(date '+%s')"
+  printf 'sample\tstatus\tstart_epoch\tend_epoch\truntime_seconds\n' > "${status_file}"
+  printf '%s\trunning\t%s\t\t\n' "${sample}" "${sample_start_epoch}" >> "${status_file}"
   prepare_matrix_chrom_sizes "${matrix_chrom_sizes}"
 
   log_msg "${sample}: assay=${assay}"
 
-  if bool_true "${RUN_FASTP:-true}"; then
-    if [ ! -s "${trim_r1}" ] || [ ! -s "${trim_r2}" ]; then
-      log_msg "${sample}: running fastp"
-      if ! fastp \
-        -i "${fastq_r1}" \
-        -I "${fastq_r2}" \
-        -o "${trim_r1}" \
-        -O "${trim_r2}" \
-        --thread "${THREADS_ALIGN}" \
-        --html "${qc_dir}/${sample}.fastp.html" \
-        --json "${qc_dir}/${sample}.fastp.json" \
-        ${FASTP_EXTRA_ARGS:-} \
-        > "${log_dir}/${sample}.fastp.log" 2>&1; then
-        echo "ERROR: ${sample}: fastp failed" >&2
-        echo "ERROR: fastp log: ${log_dir}/${sample}.fastp.log" >&2
-        tail -n 40 "${log_dir}/${sample}.fastp.log" >&2 || true
-        exit 1
+  if ! step_done "${dedup_done}" "${sample}:dedup_pairs" "${dedup_pairs}"; then
+    if bool_true "${RUN_FASTP:-true}"; then
+      if step_done "${fastp_done}" "${sample}:fastp" "${trim_r1}" "${trim_r2}" "${qc_dir}/${sample}.fastp.json"; then
+        log_msg "${sample}: trimmed FASTQ exists, skipping fastp"
+      else
+        log_msg "${sample}: running fastp"
+        run_fastp_step \
+          "${sample}" "${fastq_r1}" "${fastq_r2}" \
+          "${trim_r1}" "${trim_r2}" "${qc_dir}" "${log_dir}" \
+          || exit 1
+        mark_done "${fastp_done}" "${sample}:fastp" "${trim_r1}" "${trim_r2}" "${qc_dir}/${sample}.fastp.json"
       fi
     else
-      log_msg "${sample}: trimmed FASTQ exists, skipping fastp"
+      trim_r1="${fastq_r1}"
+      trim_r2="${fastq_r2}"
     fi
-  else
-    trim_r1="${fastq_r1}"
-    trim_r2="${fastq_r2}"
-  fi
 
-  if [ ! -s "${dedup_pairs}" ]; then
     log_msg "${sample}: aligning, parsing, sorting, and deduplicating pairs"
+    tmp_pairs="${dedup_pairs}.tmp.$$"
+    tmp_stats="${pairs_dir}/${sample}.dedup.stats.txt.tmp.$$"
+    rm -f "${tmp_pairs}" "${tmp_stats}"
     bwa-mem2 mem ${BWA_EXTRA_ARGS:-} -t "${THREADS_ALIGN}" "${BWA_INDEX_PREFIX}" "${trim_r1}" "${trim_r2}" \
       2> "${log_dir}/${sample}.bwa_mem2.log" \
       | pairtools parse \
@@ -364,35 +765,56 @@ process_sample() {
           --memory "${PAIRTOOLS_SORT_MEMORY}" \
           --tmpdir "${sample_tmp}" \
       | pairtools dedup \
-          --output-stats "${pairs_dir}/${sample}.dedup.stats.txt" \
+          --output-stats "${tmp_stats}" \
       | bgzip -@ "${THREADS_SORT}" \
-      > "${dedup_pairs}"
+      > "${tmp_pairs}"
+    mv -f "${tmp_pairs}" "${dedup_pairs}"
+    mv -f "${tmp_stats}" "${pairs_dir}/${sample}.dedup.stats.txt"
+    mark_done "${dedup_done}" "${sample}:dedup_pairs" "${dedup_pairs}"
   else
     log_msg "${sample}: deduplicated pairs exist, skipping alignment"
   fi
 
-  if [ ! -s "${dedup_pairs}.px2" ]; then
+  if step_done "${dedup_index_done}" "${sample}:dedup_pairix" "${dedup_pairs}.px2"; then
+    :
+  else
     pairix "${dedup_pairs}"
+    mark_done "${dedup_index_done}" "${sample}:dedup_pairix" "${dedup_pairs}.px2"
   fi
 
-  if [ ! -s "${valid_pairs}" ]; then
+  if step_done "${valid_done}" "${sample}:valid_pairs" "${valid_pairs}"; then
+    log_msg "${sample}: valid pairs exist, skipping selection"
+  else
     select_expr="$(build_select_expr "${assay}")"
     log_msg "${sample}: selecting valid pairs with expression: ${select_expr}"
+    tmp_pairs="${valid_pairs}.tmp.$$"
+    rm -f "${tmp_pairs}"
     pairtools select "${select_expr}" "${dedup_pairs}" \
       | filter_pairs_to_chrom_sizes "${matrix_chrom_sizes}" \
       | bgzip -@ "${THREADS_SORT}" \
-      > "${valid_pairs}"
+      > "${tmp_pairs}"
+    mv -f "${tmp_pairs}" "${valid_pairs}"
+    mark_done "${valid_done}" "${sample}:valid_pairs" "${valid_pairs}"
+  fi
+
+  if step_done "${valid_index_done}" "${sample}:valid_pairix" "${valid_pairs}.px2"; then
+    :
   else
-    log_msg "${sample}: valid pairs exist, skipping selection"
-  fi
-
-  if [ ! -s "${valid_pairs}.px2" ]; then
     pairix "${valid_pairs}"
+    mark_done "${valid_index_done}" "${sample}:valid_pairix" "${valid_pairs}.px2"
   fi
 
-  pairtools stats "${valid_pairs}" > "${pairs_dir}/${sample}.pairs.stats.txt"
+  if step_done "${stats_done}" "${sample}:pairs_stats" "${pairs_dir}/${sample}.pairs.stats.txt"; then
+    :
+  else
+    tmp_stats="${pairs_dir}/${sample}.pairs.stats.txt.tmp.$$"
+    pairtools stats "${valid_pairs}" > "${tmp_stats}"
+    mv -f "${tmp_stats}" "${pairs_dir}/${sample}.pairs.stats.txt"
+    mark_done "${stats_done}" "${sample}:pairs_stats" "${pairs_dir}/${sample}.pairs.stats.txt"
+  fi
 
   build_matrices_from_pairs "${sample}" "${valid_pairs}" "${sample_dir}" "${log_dir}" "${matrix_chrom_sizes}"
+  run_prelim_downstream "${sample}" "${norm_mcool}" "${log_dir}" "${done_dir}"
 
   if bool_true "${RUN_MULTIQC:-true}"; then
     log_msg "${sample}: running MultiQC"
@@ -401,13 +823,31 @@ process_sample() {
   fi
 
   log_msg "${sample}: finished"
+  sample_end_epoch="$(date '+%s')"
+  printf 'sample\tstatus\tstart_epoch\tend_epoch\truntime_seconds\n' > "${status_file}"
+  printf '%s\tsuccess\t%s\t%s\t%s\n' \
+    "${sample}" "${sample_start_epoch}" "${sample_end_epoch}" "$((sample_end_epoch - sample_start_epoch))" \
+    >> "${status_file}"
+
+  cleanup_sample_intermediates \
+    "${sample}" "${trim_r1}" "${trim_r2}" "${dedup_pairs}" "${juicer_pairs}" \
+    "${raw_cool}" "${norm_cool}" "${raw_mcool}" "${raw_hic}" "${sample_tmp}"
 }
 
 mkdir -p "${OUTDIR}" "${TMPDIR}"
-TECH_MANIFEST="${TMPDIR}/microc2tracks.technical_replicates.$$.tsv"
+RUN_METADATA_DIR="${OUTDIR}/run_metadata"
+SAMPLE_MANIFEST="${RUN_METADATA_DIR}/sample_manifest.tsv"
+TECH_MANIFEST="${RUN_METADATA_DIR}/technical_replicates.tsv"
+mkdir -p "${RUN_METADATA_DIR}"
+
+printf 'sample\tassay\tcondition\tbiological_replicate\ttechnical_replicate\tmerge_group\tfastq_r1\tfastq_r2\tsample_dir\n' > "${SAMPLE_MANIFEST}"
 : > "${TECH_MANIFEST}"
 
-tail -n +2 "${SAMPLESHEET}" | while IFS=, read -r sample assay condition biological_replicate technical_replicate fastq_r1 fastq_r2 rest; do
+active_jobs=0
+sample_failures=0
+sample_count=0
+
+while IFS=, read -r sample assay condition biological_replicate technical_replicate fastq_r1 fastq_r2 rest; do
   sample="$(clean_csv_field "${sample}")"
   assay="$(clean_csv_field "${assay}")"
   condition="$(clean_csv_field "${condition}")"
@@ -417,14 +857,45 @@ tail -n +2 "${SAMPLESHEET}" | while IFS=, read -r sample assay condition biologi
   fastq_r2="$(clean_csv_field "${fastq_r2}")"
 
   [ -n "${sample// }" ] || continue
-  process_sample "${sample}" "${assay}" "${fastq_r1}" "${fastq_r2}"
+
   assay_group="$(printf '%s' "${assay}" | tr '[:upper:]' '[:lower:]')"
   group_id="$(sanitize_id "${condition}_${assay_group}_B${biological_replicate}_tech_merged")"
   valid_pairs="${OUTDIR}/${sample}/03_pairs/${sample}.valid.mapq${MAPQ_THRESHOLD}.pairs.gz"
+
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "${sample}" "${assay_group}" "${condition}" "${biological_replicate}" "${technical_replicate}" \
+    "${group_id}" "${fastq_r1}" "${fastq_r2}" "${OUTDIR}/${sample}" \
+    >> "${SAMPLE_MANIFEST}"
   printf '%s\t%s\t%s\n' "${group_id}" "${sample}" "${valid_pairs}" >> "${TECH_MANIFEST}"
+
+  log_msg "${sample}: queueing sample worker"
+  process_sample "${sample}" "${assay_group}" "${fastq_r1}" "${fastq_r2}" &
+  active_jobs=$((active_jobs + 1))
+  sample_count=$((sample_count + 1))
+
+  if [ "${active_jobs}" -ge "${MAX_PARALLEL_SAMPLES}" ]; then
+    if ! wait -n; then
+      sample_failures=1
+    fi
+    active_jobs=$((active_jobs - 1))
+  fi
+done < <(tail -n +2 "${SAMPLESHEET}")
+
+while [ "${active_jobs}" -gt 0 ]; do
+  if ! wait -n; then
+    sample_failures=1
+  fi
+  active_jobs=$((active_jobs - 1))
 done
 
+[ "${sample_count}" -gt 0 ] || die "No samples found in ${SAMPLESHEET}"
+[ "${sample_failures}" -eq 0 ] || die "One or more sample workers failed; check per-sample logs under ${OUTDIR}/*/logs"
+
 merge_technical_replicate_groups "${TECH_MANIFEST}"
-rm -f "${TECH_MANIFEST}"
+generate_final_report
+
+if bool_true "${CLEAN_TMP_ON_SUCCESS:-true}"; then
+  rm -rf "${LOCK_ROOT}"
+fi
 
 log_msg "All samples finished"

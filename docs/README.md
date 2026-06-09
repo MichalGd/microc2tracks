@@ -9,6 +9,7 @@ flowchart TD
   B --> F["05_tool_strategy.md"]
   E --> G["06_troubleshooting.md"]
   C --> H["07_github_setup.md"]
+  E --> I["08_light_downstream_analysis.md"]
 ```
 
 | Document | Purpose |
@@ -20,3 +21,4 @@ flowchart TD
 | `05_tool_strategy.md` | Functionality and software strategy. |
 | `06_troubleshooting.md` | Common failure modes and fixes. |
 | `07_github_setup.md` | GitHub repository creation and upload instructions. |
+| `08_light_downstream_analysis.md` | Default light downstream analysis, TAD calls, compartments, outputs, and interpretation. |

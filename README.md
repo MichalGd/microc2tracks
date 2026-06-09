@@ -25,28 +25,36 @@ flowchart LR
   O --> L
   I --> M["Juicebox / UCSC hic tracks"]
   O --> M
+  I --> P["final report<br/>summary TSV/HTML + global MultiQC"]
+  O --> P
 ```
 
 ## What It Produces
 
 For each sample-sheet row, interpreted as one technical replicate:
 
-- trimmed FASTQ files and `fastp` QC
+- `fastp` QC, with trimmed FASTQ kept only if configured
 - deduplicated `.pairs.gz` contacts
 - MAPQ-filtered valid `.pairs.gz`
-- raw and balanced `.cool`
-- raw and balanced `.mcool`
-- raw and normalized `.hic`
+- raw and balanced `.cool` intermediates if configured
+- final balanced `.mcool`
+- final normalized `.hic`
 - pairtools stats and MultiQC report
 
 When multiple rows share the same `assay`, `condition`, and `biological_replicate`, the workflow also merges those technical replicates after per-row processing and rebuilds merged `.pairs.gz`, `.cool`, `.mcool`, and `.hic` files. Samples without technical replicates should use `technical_replicate=1`; no redundant merged output is created for a one-row technical replicate group.
 
-Optional downstream scripts can generate:
+At the end of a successful run, `results/final_report/` contains compact all-sample summary tables, a small HTML report, a file manifest, and a global MultiQC report. Large reproducible intermediates such as trimmed FASTQ, temporary Juicer pairs, raw `.hic`, raw `.mcool`, and single-resolution `.cool` files are controlled by retention switches in `config.conf`.
 
-- insulation scores and TAD boundary tables
-- compartment eigenvectors
-- saddle plot inputs
+Default light downstream analysis generates:
+
+- expected contacts / contact-decay summaries
+- insulation scores, browser-ready bedGraph tracks, boundary tables, and TAD-like BED intervals
+- compartment eigenvectors, oriented when a phasing track is supplied
+
+Optional heavier downstream scripts can generate:
+
 - loop calls with `cooltools` and/or Mustache
+- saddle plot inputs
 - Micro-C vs Hi-C side-by-side matrix plots
 - P(s) curve comparison plots
 
@@ -55,6 +63,8 @@ Optional downstream scripts can generate:
 | Area | Current functionality | Main outputs | Status |
 |---|---|---|---|
 | Input hygiene | Checks and normalizes config/sample-sheet text artifacts before parsing | Unix line endings, cleaned CSV fields | implemented |
+| Resumability | Per-step sentinels plus atomic temp outputs for major files | `logs/done/*.done`, safer restarts | implemented |
+| Parallel samples | Optional sample-level parallelism with matrix and `.hic` semaphores | 1-4 concurrent sample workers, conservative defaults | implemented |
 | FASTQ QC and trimming | Paired-end adapter detection and trimming | `fastp.html`, `fastp.json`, trimmed FASTQ | implemented |
 | Alignment | Hi-C/Micro-C style chimeric-read alignment with `bwa-mem2 mem -SP5M` | streamed SAM into pairtools | implemented |
 | Contact parsing | Parse, sort, deduplicate, and index contact pairs | `.dedup.pairs.gz`, `.valid.mapq*.pairs.gz`, `.px2` | implemented |
@@ -64,9 +74,12 @@ Optional downstream scripts can generate:
 | Matrix generation | Raw and balanced single-resolution and multiresolution matrices | `.cool`, `.mcool` | implemented |
 | `.hic` export | Juicer-compatible `.hic` generation and normalization | `.raw.hic`, `.norm.hic` | implemented |
 | Technical replicate merging | Merge filtered pair files within assay/condition/biological replicate groups and rebuild matrices | merged `.pairs.gz`, `.mcool`, `.hic` | implemented |
+| Final run reporting | Summarize samples, merged groups, important files, and global QC | TSV, HTML, global MultiQC | implemented |
+| Storage cleanup | Optional cleanup of large reproducible intermediates | smaller run directories | implemented |
 | QC aggregation | Collect QC reports where available | MultiQC report | implemented |
-| TADs / insulation | Run insulation score and boundary calling from `.mcool` | insulation tables, boundaries | implemented when `cooltools` is installed |
-| Compartments / saddle | Expected contacts, eigenvectors, saddle-ready outputs | expected TSV, eigenvectors, saddle inputs | partial; phasing track required |
+| Preliminary downstream | Default light downstream pass from each technical-replicate and merged `.mcool` | expected contacts, insulation bedGraph, TAD BED, compartments | enabled; switchable |
+| TADs / insulation | Run insulation score, bedGraph export, boundary calling, and TAD interval extraction from `.mcool` | insulation tables, bedGraph tracks, boundary calls, TAD BED | implemented |
+| Compartments / saddle | Compartment eigenvectors and saddle-ready inputs | eigenvector tables, expected TSV | compartments enabled; phasing track optional for PC1 orientation |
 | Loops | CPU-friendly loop calling | `cooltools dots`, Mustache outputs | implemented when tools are installed |
 | Stripes | Stripe detection pathway | Chromosight outputs | planned/optional |
 | Micro-C vs Hi-C comparison | Side-by-side matched-resolution matrix plots | PNG plots | implemented |
@@ -115,11 +128,13 @@ cp config/samplesheet_template.csv config/samplesheet.csv
 # Edit config/config.conf and config/samplesheet.csv first.
 # Required sample-sheet columns:
 # sample,assay,condition,biological_replicate,technical_replicate,fastq_r1,fastq_r2
+# For a quiet large-memory server, try MAX_PARALLEL_SAMPLES=2 after one serial test.
 bash scripts/preflight_check.sh -c config/config.conf -s config/samplesheet.csv
 bash scripts/microc2tracks.sh -c config/config.conf -s config/samplesheet.csv
 ```
 
-Optional heavier downstream tools can be installed in a separate environment:
+Optional heavier downstream tools, beyond the default `cooltools` light pass,
+can be installed in a separate environment:
 
 ```bash
 conda env create -f envs/downstream_optional.yml
@@ -195,10 +210,13 @@ python scripts/compare_matrices.py \
 - `scripts/microc2tracks.sh`: FASTQ to pairs, `.cool`, `.mcool`, and `.hic`
 - `scripts/merge_replicates.sh`: merge filtered pairs and rebuild matrices
 - `scripts/run_downstream.sh`: common downstream analyses from `.mcool`
+- `scripts/call_tads_from_insulation.py`: TAD-like BED intervals from cooltools insulation boundaries
+- `scripts/export_insulation_bedgraph.py`: browser-ready insulation score bedGraph tracks
 - `scripts/compare_matrices.py`: side-by-side matrix plotting
+- `scripts/summarize_run.py`: final sample/merge summary reports
 - `environment.yml`: core upstream matrix environment
 - `envs/downstream_optional.yml`: optional heavier downstream tools
-- `docs/`: analysis notes, installation, inputs, outputs, and troubleshooting
+- `docs/`: analysis notes, installation, inputs, outputs, light downstream analysis, and troubleshooting
 
 ## Server Fit
 

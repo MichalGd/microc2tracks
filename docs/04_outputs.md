@@ -9,32 +9,41 @@ results/{sample}/
     {sample}.fastp.json
     {sample}.multiqc.html
   02_trimmed/
-    {sample}.trim.R1.fastq.gz
-    {sample}.trim.R2.fastq.gz
+    {sample}.trim.R1.fastq.gz              # optional; removed by default after success
+    {sample}.trim.R2.fastq.gz              # optional; removed by default after success
   03_pairs/
-    {sample}.dedup.pairs.gz
+    {sample}.dedup.pairs.gz                # kept by default during method development
     {sample}.dedup.pairs.gz.px2
     {sample}.dedup.stats.txt
     {sample}.matrix.chrom.sizes
     {sample}.valid.mapq30.pairs.gz
     {sample}.valid.mapq30.pairs.gz.px2
     {sample}.pairs.stats.txt
-    {sample}.valid.mapq30.juicer.pairs.gz
+    {sample}.valid.mapq30.juicer.pairs.gz  # optional; removed by default after .hic creation
   04_matrices/
-    {sample}.raw.1000.cool
-    {sample}.norm.1000.cool
-    {sample}.raw.mcool
+    {sample}.raw.1000.cool                 # optional; removed by default after .mcool creation
+    {sample}.norm.1000.cool                # optional; removed by default after .mcool creation
+    {sample}.raw.mcool                     # optional; removed by default
     {sample}.norm.mcool
-    {sample}.raw.hic
+    {sample}.raw.hic                       # optional; removed by default after addNorm
     {sample}.norm.hic
     {sample}.ucsc.hic.track.txt
   05_downstream/
     expected/
     insulation/
+      bedgraph/
+    tads/
     compartments/
     loops/
     saddle/
   logs/
+    {sample}.status.tsv
+    done/
+      fastp.done
+      dedup_pairs.done
+      valid_pairs.done
+      norm_mcool.done
+      norm_hic.done
 ```
 
 Merged technical replicate outputs use the same structure under:
@@ -45,6 +54,21 @@ results/merged/{condition}_{assay}_B{biological_replicate}_tech_merged/
 
 These merged outputs are created only when two or more rows share the same `assay`, `condition`, and `biological_replicate`. A biological replicate with a single technical replicate still has complete per-row outputs under `results/{sample}/`, but the workflow skips the redundant merge.
 
+Run-level metadata and final reports are written under:
+
+```text
+results/run_metadata/
+  sample_manifest.tsv
+  technical_replicates.tsv
+
+results/final_report/
+  microc2tracks_sample_summary.tsv
+  microc2tracks_merge_summary.tsv
+  microc2tracks_file_manifest.tsv
+  microc2tracks_summary.html
+  microc2tracks_multiqc.html
+```
+
 ## Primary Outputs
 
 Use `.norm.mcool` for most open2c downstream analyses and browser-style plots.
@@ -52,6 +76,35 @@ Use `.norm.mcool` for most open2c downstream analyses and browser-style plots.
 Use `.norm.hic` for Juicebox/Juicer ecosystem tools and UCSC `track type=hic` publication.
 
 Keep `.valid.mapq30.pairs.gz` files because they are the most reusable intermediate for technical replicate merging and rebuilding matrices at new resolutions.
+
+Trimmed FASTQ, temporary Juicer pair files, raw `.hic`, raw `.mcool`, and single-resolution `.cool` files are reproducible from retained upstream files. Their retention is controlled in `config.conf`.
+
+`logs/done/*.done` files are resumability sentinels. They record successful
+step completion after outputs exist. Current runners can bootstrap missing
+sentinels from valid existing outputs, which lets older completed runs resume
+without recomputation.
+
+By default, `RUN_PRELIM_DOWNSTREAM=true`, so light downstream outputs are written
+under `05_downstream/` for each technical replicate and for each merged
+technical-replicate matrix. This mode is intended as a quick first pass and
+skips heavier loop callers. It includes expected contacts, insulation/TAD
+boundary-style tables, TAD-like BED intervals, and compartment eigenvectors. If
+`PHASING_TRACK` is not set, compartment PC1 signs are arbitrary and should be
+oriented later. Set `RUN_PRELIM_DOWNSTREAM=false` to omit this step. See
+`docs/08_light_downstream_analysis.md` for details.
+
+The default TAD BED file is:
+
+```text
+05_downstream/tads/{sample}.tads.{TAD_BOUNDARY_WINDOW_BP}.bed
+```
+
+Insulation score bedGraph tracks are written for each `INSULATION_WINDOWS_BP`
+value:
+
+```text
+05_downstream/insulation/bedgraph/{sample}.insulation_score.{window}.bedGraph
+```
 
 ## UCSC Genome Browser Compatibility
 
