@@ -8,7 +8,8 @@ The first implementation follows the style of the existing Shell repositories `f
 
 ```mermaid
 flowchart LR
-  A["Sample sheet<br/>paired FASTQ"] --> B["fastp<br/>QC + trimming"]
+  R["Validated reference registry<br/>mm39 or hg38"] --> A
+  A["Sample sheet<br/>paired FASTQ + reference_genome"] --> B["fastp<br/>QC + trimming"]
   B --> C["bwa-mem2<br/>Hi-C/Micro-C alignment"]
   C --> D["pairtools parse/sort/dedup<br/>deduplicated pairs"]
   D --> E{"Assay profile"}
@@ -17,7 +18,7 @@ flowchart LR
   F --> H["indexed valid .pairs.gz"]
   G --> H
   H --> I["per-row matrices<br/>.cool + .mcool + .hic"]
-  H --> N["technical replicate merge<br/>same assay + condition + biological replicate"]
+  H --> N["technical replicate merge<br/>same assay + condition + biological replicate + reference"]
   N --> O["merged matrices<br/>.cool + .mcool + .hic"]
   I --> K["cooltools / Mustache / Chromosight<br/>TADs, compartments, loops, stripes"]
   O --> K
@@ -41,7 +42,7 @@ For each sample-sheet row, interpreted as one technical replicate:
 - final normalized `.hic`
 - pairtools stats and MultiQC report
 
-When multiple rows share the same `assay`, `condition`, and `biological_replicate`, the workflow also merges those technical replicates after per-row processing and rebuilds merged `.pairs.gz`, `.cool`, `.mcool`, and `.hic` files. Samples without technical replicates should use `technical_replicate=1`; no redundant merged output is created for a one-row technical replicate group.
+When multiple rows share the same `assay`, `condition`, `biological_replicate`, and canonical reference, the workflow also merges those technical replicates after per-row processing and rebuilds merged `.pairs.gz`, `.cool`, `.mcool`, and `.hic` files. Cross-reference merges are rejected. Samples without technical replicates should use `technical_replicate=1`; no redundant merged output is created for a one-row technical replicate group.
 
 At the end of a successful run, `results/final_report/` contains compact all-sample summary tables, a small HTML report, a file manifest, and a global MultiQC report. Large reproducible intermediates such as trimmed FASTQ, temporary Juicer pairs, raw `.hic`, raw `.mcool`, and single-resolution `.cool` files are controlled by retention switches in `config.conf`.
 
@@ -63,7 +64,8 @@ Optional heavier downstream scripts can generate:
 | Area | Current functionality | Main outputs | Status |
 |---|---|---|---|
 | Input hygiene | Checks and normalizes config/sample-sheet text artifacts before parsing | Unix line endings, cleaned CSV fields | implemented |
-| Resumability | Per-step sentinels plus atomic temp outputs for major files | `logs/done/*.done`, safer restarts | implemented |
+| Per-sample references | Controlled aliases resolve through one registry to mm39 or hg38 paths/policies | assembly-correct alignment, matrices, tracks, manifests | implemented |
+| Resumability | Reference-bound per-step sentinels plus atomic temp outputs for major files | `logs/done/*.done`, safer restarts | implemented |
 | Parallel samples | Optional sample-level parallelism with matrix and `.hic` semaphores | 1-4 concurrent sample workers, conservative defaults | implemented |
 | FASTQ QC and trimming | Paired-end adapter detection and trimming | `fastp.html`, `fastp.json`, trimmed FASTQ | implemented |
 | Alignment | Hi-C/Micro-C style chimeric-read alignment with `bwa-mem2 mem -SP5M` | streamed SAM into pairtools | implemented |
@@ -113,6 +115,18 @@ Use one unified workflow with assay-specific configuration:
 - Both assays produce `.pairs.gz`, `.mcool`, and `.hic`, which makes downstream comparison consistent.
 - By default, matrices and `.hic` files are filtered to canonical chromosomes with `FILTER_CANONICAL_CHROMS=true`; for UCSC tracks, the retained chromosome names must also match the UCSC assembly, e.g. `chr1`, `chr2`, `chrX`.
 
+## Reference Selection
+
+Each new sample-sheet row should set `reference_genome` to `mouse`, `mm39`,
+`human`, or `hg38`. Aliases normalize to canonical `mm39`/`hg38`, and one TSV
+registry supplies the corresponding FASTA, BWA-MEM2 index, chromosome sizes,
+canonical regex, browser preset, and optional metadata. Unknown values fail.
+
+Legacy sample sheets without the column default to `mm39` with a warning. Old
+global mouse paths remain usable for that default row. Human selection is never
+silently changed to mouse. See `docs/09_multi_reference.md` for complete mouse,
+human, mixed-run, migration, chromosome-policy, and resumability examples.
+
 ## Quick Start
 
 ```bash
@@ -127,8 +141,9 @@ cp config/samplesheet_template.csv config/samplesheet.csv
 
 # Edit config/config.conf and config/samplesheet.csv first.
 # Required sample-sheet columns:
-# sample,assay,condition,biological_replicate,technical_replicate,fastq_r1,fastq_r2
-# For a quiet large-memory server, try MAX_PARALLEL_SAMPLES=2 after one serial test.
+# sample,assay,reference_genome,condition,biological_replicate,technical_replicate,fastq_r1,fastq_r2
+# Edit config/references.tsv so mm39/hg38 paths match the server.
+# Production defaults are THREADS_FASTP=8 and MAX_PARALLEL_SAMPLES=2.
 bash scripts/preflight_check.sh -c config/config.conf -s config/samplesheet.csv
 bash scripts/microc2tracks.sh -c config/config.conf -s config/samplesheet.csv
 ```
@@ -204,14 +219,18 @@ python scripts/compare_matrices.py \
 
 ## Main Files
 
-- `config/config_template.conf`: server, reference, tool, and resource defaults
-- `config/samplesheet_template.csv`: sample metadata template with biological and technical replicate columns
+- `config/config_template.conf`: server, legacy-default-reference, tool, and resource defaults
+- `config/references.tsv`: centralized mm39/hg38 registry with controlled aliases and browser/chromosome policy
+- `config/samplesheet_template.csv`: per-row reference plus biological and technical replicate metadata
 - `scripts/sanitize_text_inputs.py`: automatic line-ending/BOM/CSV-field cleanup used by preflight and the main runner
 - `scripts/microc2tracks.sh`: FASTQ to pairs, `.cool`, `.mcool`, and `.hic`
 - `scripts/merge_replicates.sh`: merge filtered pairs and rebuild matrices
 - `scripts/run_downstream.sh`: common downstream analyses from `.mcool`
 - `scripts/call_tads_from_insulation.py`: TAD-like BED intervals from cooltools insulation boundaries
 - `scripts/export_insulation_bedgraph.py`: browser-ready insulation score bedGraph tracks
+- `scripts/package_browser_tracks.py`: assembly-explicit UCSC/HiGlass track packages
+- `scripts/reference_registry.py`: registry resolution and installed-reference preflight
+- `scripts/check_fastq_pair_names.py`: optional full post-fastp R1/R2 synchronization safeguard
 - `scripts/compare_matrices.py`: side-by-side matrix plotting
 - `scripts/summarize_run.py`: final sample/merge summary reports
 - `environment.yml`: core upstream matrix environment

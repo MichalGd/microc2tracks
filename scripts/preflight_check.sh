@@ -6,7 +6,8 @@ usage() {
 Usage:
   preflight_check.sh -c config/config.conf -s config/samplesheet.csv
 
-Checks required tools, config values, reference files, and sample-sheet format.
+Checks required tools, config values, only the references used by the sample
+sheet, and sample-sheet format.
 USAGE
 }
 
@@ -52,6 +53,16 @@ python "${SCRIPT_DIR}/sanitize_text_inputs.py" --kind samplesheet "${SAMPLESHEET
 # shellcheck source=/dev/null
 source "${CONFIG}"
 
+REFERENCE_REGISTRY="${REFERENCE_REGISTRY:-${SCRIPT_DIR}/../config/references.tsv}"
+if [[ "${REFERENCE_REGISTRY}" != /* ]] && [ ! -f "${REFERENCE_REGISTRY}" ]; then
+  if [ -f "$(dirname "${CONFIG}")/${REFERENCE_REGISTRY}" ]; then
+    REFERENCE_REGISTRY="$(dirname "${CONFIG}")/${REFERENCE_REGISTRY}"
+  elif [ -f "${SCRIPT_DIR}/../config/$(basename "${REFERENCE_REGISTRY}")" ]; then
+    REFERENCE_REGISTRY="${SCRIPT_DIR}/../config/$(basename "${REFERENCE_REGISTRY}")"
+  fi
+fi
+DEFAULT_REFERENCE_ID="${DEFAULT_REFERENCE_ID:-${GENOME_ASSEMBLY:-mm39}}"
+
 THREADS_FASTP="${THREADS_FASTP:-${THREADS_ALIGN:-}}"
 THREADS_HIC_NORM="${THREADS_HIC_NORM:-24}"
 MCOOL_RESOLUTIONS="${MCOOL_RESOLUTIONS:-${RESOLUTIONS:-}}"
@@ -59,7 +70,7 @@ HIC_RESOLUTIONS="${HIC_RESOLUTIONS:-${RESOLUTIONS:-}}"
 HIC_NORMALIZATIONS="${HIC_NORMALIZATIONS:-VC,VC_SQRT,KR,SCALE}"
 
 required_vars=(
-  OUTDIR TMPDIR GENOME_ASSEMBLY REFERENCE_FASTA CHROM_SIZES
+  OUTDIR TMPDIR REFERENCE_REGISTRY DEFAULT_REFERENCE_ID
   MAPQ_THRESHOLD BASE_RESOLUTION RESOLUTIONS
   MCOOL_RESOLUTIONS HIC_RESOLUTIONS
   THREADS_FASTP THREADS_ALIGN THREADS_SORT THREADS_MATRIX
@@ -132,24 +143,6 @@ if [ "${FASTP_TIMEOUT_SECONDS}" -gt 0 ] && ! command -v timeout >/dev/null 2>&1;
   die "FASTP_TIMEOUT_SECONDS is set but GNU/coreutils timeout was not found"
 fi
 
-[ -f "${REFERENCE_FASTA}" ] || die "REFERENCE_FASTA not found: ${REFERENCE_FASTA}"
-[ -f "${CHROM_SIZES}" ] || die "CHROM_SIZES not found: ${CHROM_SIZES}"
-BWA_INDEX_PREFIX="${BWA_INDEX_PREFIX:-$REFERENCE_FASTA}"
-
-if [ ! -f "${BWA_INDEX_PREFIX}.bwt.2bit.64" ]; then
-  echo "WARNING: BWA-MEM2 index file not found: ${BWA_INDEX_PREFIX}.bwt.2bit.64" >&2
-  echo "         Create it with: bwa-mem2 index \"${BWA_INDEX_PREFIX}\"" >&2
-  echo "         If the index prefix differs from REFERENCE_FASTA, set BWA_INDEX_PREFIX in config.conf." >&2
-fi
-
-if [ "${FILTER_CANONICAL_CHROMS:-true}" = "true" ]; then
-  retained_chroms="$(
-    awk -v regex="${CANONICAL_CHROMS_REGEX:-^(chr)?([1-9][0-9]?|X|Y|M|MT)$}" '$1 ~ regex {count++} END{print count+0}' "${CHROM_SIZES}"
-  )"
-  [ "${retained_chroms}" -gt 0 ] || die "FILTER_CANONICAL_CHROMS=true but CANONICAL_CHROMS_REGEX retained no chromosomes from CHROM_SIZES"
-  echo "Canonical chromosome filter retains ${retained_chroms} chromosome(s)."
-fi
-
 if [ "${RUN_HIC:-true}" = "true" ]; then
   [ -f "${JUICER_TOOLS_JAR:-}" ] || die "RUN_HIC=true but JUICER_TOOLS_JAR not found: ${JUICER_TOOLS_JAR:-unset}"
   [ -n "${HIC_RESOLUTIONS}" ] || die "RUN_HIC=true but HIC_RESOLUTIONS is empty"
@@ -162,9 +155,40 @@ if bool_true "${CHECK_FASTQ_GZIP:-false}"; then
   validate_args+=(--check-gzip)
 fi
 
-python "${SCRIPT_DIR}/validate_samplesheet.py" "${validate_args[@]}" "${SAMPLESHEET}"
+normalized_sheet="$(mktemp)"
+trap 'rm -f "${normalized_sheet}"' EXIT
+python "${SCRIPT_DIR}/validate_samplesheet.py" \
+  "${validate_args[@]}" \
+  --reference-registry "${REFERENCE_REGISTRY}" \
+  --default-reference "${DEFAULT_REFERENCE_ID}" \
+  --normalized-output "${normalized_sheet}" \
+  --output-format tsv \
+  "${SAMPLESHEET}"
 
-echo "Checking chromosome-size first entry..."
-head -n 1 "${CHROM_SIZES}" || true
+mapfile -t used_references < <(tail -n +2 "${normalized_sheet}" | cut -f3 | sort -u)
+[ "${#used_references[@]}" -gt 0 ] || die "No resolved references found in sample sheet"
+
+registry_args=(validate --registry "${REFERENCE_REGISTRY}" --check-files)
+for reference_id in "${used_references[@]}"; do
+  registry_args+=(--reference "${reference_id}")
+done
+
+# Legacy global paths override the default reference row only. This preserves
+# old mouse configs without allowing per-sample values to become paths.
+resolved_default="$(python "${SCRIPT_DIR}/reference_registry.py" resolve --registry "${REFERENCE_REGISTRY}" "${DEFAULT_REFERENCE_ID}" | head -n 1)"
+if printf '%s\n' "${used_references[@]}" | grep -Fxq "${resolved_default}" \
+  && [ -n "${REFERENCE_FASTA:-}" ] && [ -n "${CHROM_SIZES:-}" ]; then
+  registry_args+=(
+    --override-reference "${resolved_default}"
+    --override-fasta "${REFERENCE_FASTA}"
+    --override-bwa-index-prefix "${BWA_INDEX_PREFIX:-${REFERENCE_FASTA}}"
+    --override-chrom-sizes "${CHROM_SIZES}"
+  )
+  [ -z "${CANONICAL_CHROMS_REGEX:-}" ] || registry_args+=(--override-canonical-regex "${CANONICAL_CHROMS_REGEX}")
+  [ -z "${PHASING_TRACK:-}" ] || registry_args+=(--override-phasing-track "${PHASING_TRACK}")
+fi
+
+echo "Validating used references: ${used_references[*]}"
+python "${SCRIPT_DIR}/reference_registry.py" "${registry_args[@]}"
 
 echo "Preflight finished successfully."

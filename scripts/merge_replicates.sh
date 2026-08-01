@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage:
-  merge_replicates.sh -c config/config.conf -n merge_name -p pairs1.gz,pairs2.gz[,pairs3.gz...]
+  merge_replicates.sh -c config/config.conf -n merge_name -r reference_id -p pairs1.gz,pairs2.gz[,pairs3.gz...]
 
 Merges filtered valid pairs with pairtools merge, indexes the merged pairs,
 computes pairtools stats, and rebuilds .cool/.mcool/.hic matrices.
@@ -44,6 +44,8 @@ mark_done() {
     printf 'step\t%s\n' "${step}"
     printf 'completed_at\t%s\n' "$(date '+%Y-%m-%d %H:%M:%S')"
     printf 'config\t%s\n' "${CONFIG}"
+    printf 'reference_id\t%s\n' "${REFERENCE_ID:-unknown}"
+    printf 'assembly\t%s\n' "${GENOME_ASSEMBLY:-unknown}"
     printf 'outputs\t%s\n' "$*"
   } > "${done_file}.tmp.$$"
   mv -f "${done_file}.tmp.$$" "${done_file}"
@@ -55,10 +57,20 @@ step_done() {
   shift 2
 
   if outputs_complete "$@"; then
-    if [ ! -s "${done_file}" ] && bool_true "${BOOTSTRAP_SENTINELS:-true}"; then
-      mark_done "${done_file}" "${step}" "$@"
+    if [ -s "${done_file}" ]; then
+      if sentinel_matches_reference "${done_file}" "${REFERENCE_ID:-unknown}" "${GENOME_ASSEMBLY:-unknown}"; then
+        return 0
+      fi
+      log_msg "${step}: completion metadata has a different or missing reference; rebuilding"
+      return 1
     fi
-    return 0
+    if bool_true "${BOOTSTRAP_SENTINELS:-true}" \
+      && bool_true "${ALLOW_LEGACY_MM39_RESUME:-true}" \
+      && [ "${REFERENCE_ID:-}" = "mm39" ]; then
+      log_msg "${step}: adopting legacy mouse output and recording reference_id=mm39"
+      mark_done "${done_file}" "${step}" "$@"
+      return 0
+    fi
   fi
 
   return 1
@@ -82,6 +94,7 @@ write_ucsc_hic_track() {
   if [ -n "${PUBLIC_HIC_BASE_URL:-}" ]; then
     public_url="${PUBLIC_HIC_BASE_URL%/}/${hic_for_url}"
     cat > "${matrix_dir}/${sample}.ucsc.hic.track.txt" <<TRACK
+# reference_id=${REFERENCE_ID} assembly=${GENOME_ASSEMBLY} browser_preset=${BROWSER_PRESET}
 track type=hic name="${sample}" description="${sample} normalized Hi-C/Micro-C contacts" bigDataUrl=${public_url}
 TRACK
   fi
@@ -147,12 +160,14 @@ cleanup_merge_intermediates() {
 CONFIG=""
 MERGE_NAME=""
 PAIRS_CSV=""
+REFERENCE_REQUEST=""
 
-while getopts ":c:n:p:h" opt; do
+while getopts ":c:n:p:r:h" opt; do
   case "${opt}" in
     c) CONFIG="${OPTARG}" ;;
     n) MERGE_NAME="${OPTARG}" ;;
     p) PAIRS_CSV="${OPTARG}" ;;
+    r) REFERENCE_REQUEST="${OPTARG}" ;;
     h) usage; exit 0 ;;
     :) die "Option -${OPTARG} requires an argument" ;;
     \?) die "Unknown option: -${OPTARG}" ;;
@@ -165,16 +180,69 @@ done
 [ -f "${CONFIG}" ] || die "Config not found: ${CONFIG}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=reference_sentinel.sh
+source "${SCRIPT_DIR}/reference_sentinel.sh"
 python "${SCRIPT_DIR}/sanitize_text_inputs.py" --kind config "${CONFIG}"
 
 # shellcheck source=/dev/null
 source "${CONFIG}"
+
+TAB=$'\t'
+REFERENCE_REGISTRY="${REFERENCE_REGISTRY:-${SCRIPT_DIR}/../config/references.tsv}"
+if [[ "${REFERENCE_REGISTRY}" != /* ]] && [ ! -f "${REFERENCE_REGISTRY}" ]; then
+  if [ -f "$(dirname "${CONFIG}")/${REFERENCE_REGISTRY}" ]; then
+    REFERENCE_REGISTRY="$(dirname "${CONFIG}")/${REFERENCE_REGISTRY}"
+  elif [ -f "${SCRIPT_DIR}/../config/$(basename "${REFERENCE_REGISTRY}")" ]; then
+    REFERENCE_REGISTRY="${SCRIPT_DIR}/../config/$(basename "${REFERENCE_REGISTRY}")"
+  fi
+fi
+[ -f "${REFERENCE_REGISTRY}" ] || die "REFERENCE_REGISTRY not found: ${REFERENCE_REGISTRY}"
+DEFAULT_REFERENCE_ID="${DEFAULT_REFERENCE_ID:-${GENOME_ASSEMBLY:-mm39}}"
+REFERENCE_REQUEST="${REFERENCE_REQUEST:-${DEFAULT_REFERENCE_ID}}"
+mapfile -t reference_fields < <(
+  python "${SCRIPT_DIR}/reference_registry.py" resolve \
+    --registry "${REFERENCE_REGISTRY}" "${REFERENCE_REQUEST}"
+)
+[ "${#reference_fields[@]}" -eq 11 ] || die "Could not resolve reference ${REFERENCE_REQUEST}"
+REFERENCE_ID="${reference_fields[0]}"
+REFERENCE_SPECIES="${reference_fields[1]}"
+GENOME_ASSEMBLY="${reference_fields[2]}"
+REFERENCE_FASTA_RESOLVED="${reference_fields[3]}"
+BWA_INDEX_PREFIX_RESOLVED="${reference_fields[4]}"
+CHROM_SIZES_RESOLVED="${reference_fields[5]}"
+CANONICAL_CHROMS_REGEX_RESOLVED="${reference_fields[6]}"
+BROWSER_PRESET="${reference_fields[7]}"
+PHASING_TRACK_RESOLVED="${reference_fields[8]}"
+ANNOTATION_METADATA="${reference_fields[9]}"
+BLACKLIST_METADATA="${reference_fields[10]}"
+
+mapfile -t default_fields < <(
+  python "${SCRIPT_DIR}/reference_registry.py" resolve \
+    --registry "${REFERENCE_REGISTRY}" "${DEFAULT_REFERENCE_ID}"
+)
+DEFAULT_REFERENCE_ID="${default_fields[0]}"
+if [ "${REFERENCE_ID}" = "${DEFAULT_REFERENCE_ID}" ] \
+  && [ -n "${REFERENCE_FASTA:-}" ] && [ -n "${CHROM_SIZES:-}" ]; then
+  REFERENCE_FASTA_RESOLVED="${REFERENCE_FASTA}"
+  BWA_INDEX_PREFIX_RESOLVED="${BWA_INDEX_PREFIX:-${REFERENCE_FASTA}}"
+  CHROM_SIZES_RESOLVED="${CHROM_SIZES}"
+  [ -z "${CANONICAL_CHROMS_REGEX:-}" ] || CANONICAL_CHROMS_REGEX_RESOLVED="${CANONICAL_CHROMS_REGEX}"
+  [ -z "${PHASING_TRACK:-}" ] || PHASING_TRACK_RESOLVED="${PHASING_TRACK}"
+fi
+REFERENCE_FASTA="${REFERENCE_FASTA_RESOLVED}"
+BWA_INDEX_PREFIX="${BWA_INDEX_PREFIX_RESOLVED}"
+CHROM_SIZES="${CHROM_SIZES_RESOLVED}"
+CANONICAL_CHROMS_REGEX="${CANONICAL_CHROMS_REGEX_RESOLVED}"
+PHASING_TRACK="${PHASING_TRACK_RESOLVED}"
+[ -f "${REFERENCE_FASTA}" ] || die "Reference FASTA not found for ${REFERENCE_ID}: ${REFERENCE_FASTA}"
+[ -f "${CHROM_SIZES}" ] || die "Chromosome sizes not found for ${REFERENCE_ID}: ${CHROM_SIZES}"
 
 MCOOL_RESOLUTIONS="${MCOOL_RESOLUTIONS:-${RESOLUTIONS}}"
 HIC_RESOLUTIONS="${HIC_RESOLUTIONS:-${RESOLUTIONS}}"
 THREADS_HIC_NORM="${THREADS_HIC_NORM:-24}"
 HIC_NORMALIZATIONS="${HIC_NORMALIZATIONS:-VC,VC_SQRT,KR,SCALE}"
 BOOTSTRAP_SENTINELS="${BOOTSTRAP_SENTINELS:-true}"
+ALLOW_LEGACY_MM39_RESUME="${ALLOW_LEGACY_MM39_RESUME:-true}"
 
 IFS=, read -r -a PAIR_FILES <<< "${PAIRS_CSV}"
 [ "${#PAIR_FILES[@]}" -ge 2 ] || die "At least two pair files are required"
@@ -182,6 +250,9 @@ IFS=, read -r -a PAIR_FILES <<< "${PAIRS_CSV}"
 for pair_file in "${PAIR_FILES[@]}"; do
   [ -f "${pair_file}" ] || die "Pair file not found: ${pair_file}"
 done
+
+python "${SCRIPT_DIR}/validate_pairs_reference.py" \
+  --assembly "${GENOME_ASSEMBLY}" "${PAIR_FILES[@]}"
 
 MERGE_DIR="${OUTDIR}/merged/${MERGE_NAME}"
 PAIRS_DIR="${MERGE_DIR}/03_pairs"
@@ -193,8 +264,19 @@ DONE_DIR="${LOG_DIR}/done"
 mkdir -p "${PAIRS_DIR}" "${MATRIX_DIR}" "${LOG_DIR}" "${DONE_DIR}" "${MERGE_TMP}"
 MERGE_START_EPOCH="$(date '+%s')"
 MERGE_STATUS_FILE="${LOG_DIR}/${MERGE_NAME}.status.tsv"
-printf 'merge_group\tstatus\tstart_epoch\tend_epoch\truntime_seconds\n' > "${MERGE_STATUS_FILE}"
-printf '%s\trunning\t%s\t\t\n' "${MERGE_NAME}" "${MERGE_START_EPOCH}" >> "${MERGE_STATUS_FILE}"
+printf 'merge_group\treference_id\tassembly\tstatus\tstart_epoch\tend_epoch\truntime_seconds\n' > "${MERGE_STATUS_FILE}"
+printf '%s\t%s\t%s\trunning\t%s\t\t\n' "${MERGE_NAME}" "${REFERENCE_ID}" "${GENOME_ASSEMBLY}" "${MERGE_START_EPOCH}" >> "${MERGE_STATUS_FILE}"
+{
+  printf 'reference_id\t%s\n' "${REFERENCE_ID}"
+  printf 'species\t%s\n' "${REFERENCE_SPECIES}"
+  printf 'assembly\t%s\n' "${GENOME_ASSEMBLY}"
+  printf 'fasta\t%s\n' "${REFERENCE_FASTA}"
+  printf 'chrom_sizes\t%s\n' "${CHROM_SIZES}"
+  printf 'browser_preset\t%s\n' "${BROWSER_PRESET}"
+  printf 'phasing_track\t%s\n' "${PHASING_TRACK}"
+  printf 'annotation_metadata\t%s\n' "${ANNOTATION_METADATA}"
+  printf 'blacklist_metadata\t%s\n' "${BLACKLIST_METADATA}"
+} > "${LOG_DIR}/${MERGE_NAME}.reference.tsv"
 
 MATRIX_CHROM_SIZES="${PAIRS_DIR}/${MERGE_NAME}.matrix.chrom.sizes"
 prepare_matrix_chrom_sizes "${MATRIX_CHROM_SIZES}"
@@ -210,7 +292,7 @@ if step_done "${RAW_MERGED_DONE}" "${MERGE_NAME}:raw_merged_pairs" "${RAW_MERGED
   log_msg "${MERGE_NAME}: raw merged pairs exist, skipping merge"
 else
   log_msg "${MERGE_NAME}: merging ${#PAIR_FILES[@]} pair files"
-  RAW_MERGED_TMP="${RAW_MERGED_PAIRS}.tmp.$$"
+  RAW_MERGED_TMP="${RAW_MERGED_PAIRS%.pairs.gz}.tmp.$$.pairs.gz"
   rm -f "${RAW_MERGED_TMP}"
   pairtools merge \
     --nproc "${THREADS_MERGE}" \
@@ -227,7 +309,7 @@ if step_done "${MERGED_DONE}" "${MERGE_NAME}:merged_pairs" "${MERGED_PAIRS}"; th
   log_msg "${MERGE_NAME}: filtered merged pairs exist, skipping chromosome filter"
 else
   log_msg "${MERGE_NAME}: filtering merged pairs to matrix chromosomes"
-  MERGED_TMP="${MERGED_PAIRS}.tmp.$$"
+  MERGED_TMP="${MERGED_PAIRS%.pairs.gz}.tmp.$$.pairs.gz"
   rm -f "${MERGED_TMP}"
   zcat "${RAW_MERGED_PAIRS}" \
     | filter_pairs_to_chrom_sizes "${MATRIX_CHROM_SIZES}" \
@@ -355,7 +437,7 @@ if bool_true "${RUN_HIC:-true}"; then
     log_msg "${MERGE_NAME}: Juicer-compatible pairs exist, skipping"
   else
     log_msg "${MERGE_NAME}: writing Juicer-compatible pairs"
-    JUICER_PAIRS_TMP="${JUICER_PAIRS}.tmp.$$"
+    JUICER_PAIRS_TMP="${JUICER_PAIRS%.pairs.gz}.tmp.$$.pairs.gz"
     rm -f "${JUICER_PAIRS_TMP}"
     zcat "${MERGED_PAIRS}" \
       | awk 'BEGIN{OFS="\t"} /^## pairs format/ {print; next} /^#columns:/ {print; next} /^#/ {next} {print}' \
@@ -404,6 +486,8 @@ if bool_true "${RUN_PRELIM_DOWNSTREAM:-true}"; then
     log_msg "${MERGE_NAME}: preliminary downstream already marked complete, skipping"
   elif [ -s "${NORM_MCOOL}" ]; then
     log_msg "${MERGE_NAME}: running preliminary downstream analyses"
+    MICROC2TRACKS_PHASING_TRACK_OVERRIDE="${PHASING_TRACK}" \
+    MICROC2TRACKS_REFERENCE_ID="${REFERENCE_ID}" \
     bash "${SCRIPT_DIR}/run_downstream.sh" \
       -l \
       -c "${CONFIG}" \
@@ -418,9 +502,9 @@ if bool_true "${RUN_PRELIM_DOWNSTREAM:-true}"; then
 fi
 
 MERGE_END_EPOCH="$(date '+%s')"
-printf 'merge_group\tstatus\tstart_epoch\tend_epoch\truntime_seconds\n' > "${MERGE_STATUS_FILE}"
-printf '%s\tsuccess\t%s\t%s\t%s\n' \
-  "${MERGE_NAME}" "${MERGE_START_EPOCH}" "${MERGE_END_EPOCH}" "$((MERGE_END_EPOCH - MERGE_START_EPOCH))" \
+printf 'merge_group\treference_id\tassembly\tstatus\tstart_epoch\tend_epoch\truntime_seconds\n' > "${MERGE_STATUS_FILE}"
+printf '%s\t%s\t%s\tsuccess\t%s\t%s\t%s\n' \
+  "${MERGE_NAME}" "${REFERENCE_ID}" "${GENOME_ASSEMBLY}" "${MERGE_START_EPOCH}" "${MERGE_END_EPOCH}" "$((MERGE_END_EPOCH - MERGE_START_EPOCH))" \
   >> "${MERGE_STATUS_FILE}"
 
 cleanup_merge_intermediates

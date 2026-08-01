@@ -10,7 +10,10 @@ Runs paired-end FASTQ through:
   fastp -> bwa-mem2 -> pairtools -> cooler/mcool -> Juicer .hic
 
 Sample sheet columns:
-  sample,assay,condition,biological_replicate,technical_replicate,fastq_r1,fastq_r2
+  sample,assay,reference_genome,condition,biological_replicate,technical_replicate,fastq_r1,fastq_r2
+
+reference_genome accepts controlled aliases from config/references.tsv. Legacy
+sheets without the column use DEFAULT_REFERENCE_ID (mm39 by default) with a warning.
 USAGE
 }
 
@@ -119,6 +122,8 @@ mark_done() {
     printf 'step\t%s\n' "${step}"
     printf 'completed_at\t%s\n' "$(date '+%Y-%m-%d %H:%M:%S')"
     printf 'config\t%s\n' "${CONFIG}"
+    printf 'reference_id\t%s\n' "${REFERENCE_ID:-unknown}"
+    printf 'assembly\t%s\n' "${GENOME_ASSEMBLY:-unknown}"
     printf 'outputs\t%s\n' "$*"
   } > "${done_file}.tmp.$$"
   mv -f "${done_file}.tmp.$$" "${done_file}"
@@ -130,10 +135,20 @@ step_done() {
   shift 2
 
   if outputs_complete "$@"; then
-    if [ ! -s "${done_file}" ] && bool_true "${BOOTSTRAP_SENTINELS:-true}"; then
-      mark_done "${done_file}" "${step}" "$@"
+    if [ -s "${done_file}" ]; then
+      if sentinel_matches_reference "${done_file}" "${REFERENCE_ID:-unknown}" "${GENOME_ASSEMBLY:-unknown}"; then
+        return 0
+      fi
+      log_msg "${step}: completion metadata has a different or missing reference; rebuilding"
+      return 1
     fi
-    return 0
+    if bool_true "${BOOTSTRAP_SENTINELS:-true}" \
+      && bool_true "${ALLOW_LEGACY_MM39_RESUME:-true}" \
+      && [ "${REFERENCE_ID:-}" = "mm39" ]; then
+      log_msg "${step}: adopting legacy mouse output and recording reference_id=mm39"
+      mark_done "${done_file}" "${step}" "$@"
+      return 0
+    fi
   fi
 
   return 1
@@ -157,6 +172,7 @@ write_ucsc_hic_track() {
   if [ -n "${PUBLIC_HIC_BASE_URL:-}" ]; then
     public_url="${PUBLIC_HIC_BASE_URL%/}/${hic_for_url}"
     cat > "${matrix_dir}/${sample}.ucsc.hic.track.txt" <<TRACK
+# reference_id=${REFERENCE_ID} assembly=${GENOME_ASSEMBLY} browser_preset=${BROWSER_PRESET}
 track type=hic name="${sample}" description="${sample} normalized Hi-C/Micro-C contacts" bigDataUrl=${public_url}
 TRACK
   fi
@@ -193,6 +209,37 @@ filter_pairs_to_chrom_sizes() {
   '
 }
 
+load_reference() {
+  local requested="$1"
+  local -a fields
+  mapfile -t fields < <(
+    python "${SCRIPT_DIR}/reference_registry.py" resolve \
+      --registry "${REFERENCE_REGISTRY}" "${requested}"
+  )
+  [ "${#fields[@]}" -eq 11 ] || die "Could not resolve complete registry entry for ${requested}"
+
+  RESOLVED_REFERENCE_ID="${fields[0]}"
+  RESOLVED_SPECIES="${fields[1]}"
+  RESOLVED_ASSEMBLY="${fields[2]}"
+  RESOLVED_FASTA="${fields[3]}"
+  RESOLVED_BWA_INDEX_PREFIX="${fields[4]}"
+  RESOLVED_CHROM_SIZES="${fields[5]}"
+  RESOLVED_CANONICAL_REGEX="${fields[6]}"
+  RESOLVED_BROWSER_PRESET="${fields[7]}"
+  RESOLVED_PHASING_TRACK="${fields[8]}"
+  RESOLVED_ANNOTATION_METADATA="${fields[9]}"
+  RESOLVED_BLACKLIST_METADATA="${fields[10]}"
+
+  if [ "${RESOLVED_REFERENCE_ID}" = "${DEFAULT_REFERENCE_ID}" ] \
+    && [ -n "${LEGACY_REFERENCE_FASTA}" ] && [ -n "${LEGACY_CHROM_SIZES}" ]; then
+    RESOLVED_FASTA="${LEGACY_REFERENCE_FASTA}"
+    RESOLVED_BWA_INDEX_PREFIX="${LEGACY_BWA_INDEX_PREFIX:-${LEGACY_REFERENCE_FASTA}}"
+    RESOLVED_CHROM_SIZES="${LEGACY_CHROM_SIZES}"
+    [ -z "${LEGACY_CANONICAL_REGEX}" ] || RESOLVED_CANONICAL_REGEX="${LEGACY_CANONICAL_REGEX}"
+    [ -z "${LEGACY_PHASING_TRACK}" ] || RESOLVED_PHASING_TRACK="${LEGACY_PHASING_TRACK}"
+  fi
+}
+
 CONFIG=""
 SAMPLESHEET=""
 
@@ -212,21 +259,43 @@ done
 [ -f "${SAMPLESHEET}" ] || die "Sample sheet not found: ${SAMPLESHEET}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=reference_sentinel.sh
+source "${SCRIPT_DIR}/reference_sentinel.sh"
 python "${SCRIPT_DIR}/sanitize_text_inputs.py" --kind config "${CONFIG}"
 python "${SCRIPT_DIR}/sanitize_text_inputs.py" --kind samplesheet "${SAMPLESHEET}"
 
 # shellcheck source=/dev/null
 source "${CONFIG}"
 
-[ -f "${REFERENCE_FASTA}" ] || die "REFERENCE_FASTA not found: ${REFERENCE_FASTA}"
-[ -f "${CHROM_SIZES}" ] || die "CHROM_SIZES not found: ${CHROM_SIZES}"
-BWA_INDEX_PREFIX="${BWA_INDEX_PREFIX:-$REFERENCE_FASTA}"
+TAB=$'\t'
+REFERENCE_REGISTRY="${REFERENCE_REGISTRY:-${SCRIPT_DIR}/../config/references.tsv}"
+if [[ "${REFERENCE_REGISTRY}" != /* ]] && [ ! -f "${REFERENCE_REGISTRY}" ]; then
+  if [ -f "$(dirname "${CONFIG}")/${REFERENCE_REGISTRY}" ]; then
+    REFERENCE_REGISTRY="$(dirname "${CONFIG}")/${REFERENCE_REGISTRY}"
+  elif [ -f "${SCRIPT_DIR}/../config/$(basename "${REFERENCE_REGISTRY}")" ]; then
+    REFERENCE_REGISTRY="${SCRIPT_DIR}/../config/$(basename "${REFERENCE_REGISTRY}")"
+  fi
+fi
+[ -f "${REFERENCE_REGISTRY}" ] || die "REFERENCE_REGISTRY not found: ${REFERENCE_REGISTRY}"
+LEGACY_REFERENCE_FASTA="${REFERENCE_FASTA:-}"
+LEGACY_BWA_INDEX_PREFIX="${BWA_INDEX_PREFIX:-}"
+LEGACY_CHROM_SIZES="${CHROM_SIZES:-}"
+LEGACY_CANONICAL_REGEX="${CANONICAL_CHROMS_REGEX:-}"
+LEGACY_PHASING_TRACK="${PHASING_TRACK:-}"
+DEFAULT_REFERENCE_ID="${DEFAULT_REFERENCE_ID:-${GENOME_ASSEMBLY:-mm39}}"
+mapfile -t default_reference_fields < <(
+  python "${SCRIPT_DIR}/reference_registry.py" resolve \
+    --registry "${REFERENCE_REGISTRY}" "${DEFAULT_REFERENCE_ID}"
+)
+[ "${#default_reference_fields[@]}" -eq 11 ] || die "Could not resolve DEFAULT_REFERENCE_ID=${DEFAULT_REFERENCE_ID}"
+DEFAULT_REFERENCE_ID="${default_reference_fields[0]}"
 THREADS_FASTP="${THREADS_FASTP:-${THREADS_ALIGN:-1}}"
 THREADS_HIC_NORM="${THREADS_HIC_NORM:-24}"
 MCOOL_RESOLUTIONS="${MCOOL_RESOLUTIONS:-${RESOLUTIONS}}"
 HIC_RESOLUTIONS="${HIC_RESOLUTIONS:-${RESOLUTIONS}}"
 HIC_NORMALIZATIONS="${HIC_NORMALIZATIONS:-VC,VC_SQRT,KR,SCALE}"
 BOOTSTRAP_SENTINELS="${BOOTSTRAP_SENTINELS:-true}"
+ALLOW_LEGACY_MM39_RESUME="${ALLOW_LEGACY_MM39_RESUME:-true}"
 
 MAX_PARALLEL_SAMPLES="${MAX_PARALLEL_SAMPLES:-1}"
 MAX_PARALLEL_MATRIX="${MAX_PARALLEL_MATRIX:-1}"
@@ -253,8 +322,15 @@ fi
 PIPELINE_RUN_ID="$(date '+%Y%m%d_%H%M%S')_$$"
 LOCK_ROOT="${TMPDIR}/microc2tracks_locks/${PIPELINE_RUN_ID}"
 mkdir -p "${LOCK_ROOT}"
+NORMALIZED_SAMPLESHEET="${LOCK_ROOT}/resolved_samplesheet.tsv"
 
-python "${SCRIPT_DIR}/validate_samplesheet.py" --require-files "${SAMPLESHEET}"
+python "${SCRIPT_DIR}/validate_samplesheet.py" \
+  --require-files \
+  --reference-registry "${REFERENCE_REGISTRY}" \
+  --default-reference "${DEFAULT_REFERENCE_ID}" \
+  --normalized-output "${NORMALIZED_SAMPLESHEET}" \
+  --output-format tsv \
+  "${SAMPLESHEET}"
 
 build_select_expr() {
   local assay="$1"
@@ -287,11 +363,11 @@ merge_technical_replicate_groups() {
 
   [ -s "${manifest}" ] || return 0
 
-  cut -f1 "${manifest}" | sort -u | while read -r group_id; do
+  tail -n +2 "${manifest}" | cut -f1 | sort -u | while read -r group_id; do
     [ -n "${group_id}" ] || continue
 
     local count
-    count="$(awk -F'\t' -v group="${group_id}" '$1 == group {count++} END{print count+0}' "${manifest}")"
+    count="$(awk -F'\t' -v group="${group_id}" 'NR > 1 && $1 == group {count++} END{print count+0}' "${manifest}")"
 
     if [ "${count}" -le 1 ]; then
       log_msg "${group_id}: only one technical replicate, skipping merge"
@@ -300,14 +376,20 @@ merge_technical_replicate_groups() {
 
     local pairs_csv
     pairs_csv="$(
-      awk -F'\t' -v group="${group_id}" '$1 == group {print $3}' "${manifest}" \
+      awk -F'\t' -v group="${group_id}" 'NR > 1 && $1 == group {print $3}' "${manifest}" \
         | paste -sd, -
     )"
+
+    local reference_id
+    reference_id="$(awk -F'\t' -v group="${group_id}" 'NR > 1 && $1 == group {print $4}' "${manifest}" | sort -u)"
+    [ "$(printf '%s\n' "${reference_id}" | sed '/^$/d' | wc -l)" -eq 1 ] \
+      || die "${group_id}: prohibited merge across multiple references: ${reference_id}"
 
     log_msg "${group_id}: merging ${count} technical replicates"
     bash "${SCRIPT_DIR}/merge_replicates.sh" \
       -c "${CONFIG}" \
       -n "${group_id}" \
+      -r "${reference_id}" \
       -p "${pairs_csv}"
   done
 }
@@ -435,7 +517,7 @@ build_hic_products() {
       log_msg "${sample}: Juicer-compatible pairs exist, skipping"
     else
       log_msg "${sample}: writing Juicer-compatible pairs"
-      tmp="${juicer_pairs}.tmp.$$"
+      tmp="${juicer_pairs%.pairs.gz}.tmp.$$.pairs.gz"
       rm -f "${tmp}"
       zcat "${pairs}" \
         | awk 'BEGIN{OFS="\t"} /^## pairs format/ {print; next} /^#columns:/ {print; next} /^#/ {next} {print}' \
@@ -570,7 +652,8 @@ generate_final_report() {
       -s "${SAMPLESHEET}" \
       -o "${report_dir}" \
       --sample-manifest "${SAMPLE_MANIFEST}" \
-      --technical-manifest "${TECH_MANIFEST}"
+      --technical-manifest "${TECH_MANIFEST}" \
+      --merge-manifest "${MERGE_MANIFEST}"
   fi
 }
 
@@ -585,7 +668,7 @@ run_prelim_downstream() {
     return 0
   fi
 
-  if [ -s "${done_file}" ]; then
+  if step_done "${done_file}" "${sample}:prelim_downstream" "${matrix}"; then
     log_msg "${sample}: preliminary downstream already marked complete, skipping"
     return 0
   fi
@@ -596,6 +679,8 @@ run_prelim_downstream() {
   fi
 
   log_msg "${sample}: running preliminary downstream analyses"
+  MICROC2TRACKS_PHASING_TRACK_OVERRIDE="${PHASING_TRACK}" \
+  MICROC2TRACKS_REFERENCE_ID="${REFERENCE_ID}" \
   bash "${SCRIPT_DIR}/run_downstream.sh" \
     -l \
     -c "${CONFIG}" \
@@ -624,8 +709,8 @@ run_fastp_step() {
   local qc_dir="$6"
   local log_dir="$7"
   local fastp_log="${log_dir}/${sample}.fastp.log"
-  local tmp_trim_r1="${trim_r1}.tmp.$$"
-  local tmp_trim_r2="${trim_r2}.tmp.$$"
+  local tmp_trim_r1="${trim_r1%.fastq.gz}.tmp.$$.fastq.gz"
+  local tmp_trim_r2="${trim_r2%.fastq.gz}.tmp.$$.fastq.gz"
   local fastp_html="${qc_dir}/${sample}.fastp.html"
   local fastp_json="${qc_dir}/${sample}.fastp.json"
   local tmp_html="${fastp_html}.tmp.$$"
@@ -681,6 +766,7 @@ run_fastp_step() {
 
   log_msg "${sample}: fastp finished; trimmed R1 $(fastq_file_summary "${trim_r1}")"
   log_msg "${sample}: fastp finished; trimmed R2 $(fastq_file_summary "${trim_r2}")"
+
 }
 
 process_sample() {
@@ -688,6 +774,17 @@ process_sample() {
   local assay="$2"
   local fastq_r1="$3"
   local fastq_r2="$4"
+  local REFERENCE_ID="$5"
+  local REFERENCE_SPECIES="$6"
+  local GENOME_ASSEMBLY="$7"
+  local REFERENCE_FASTA="$8"
+  local BWA_INDEX_PREFIX="$9"
+  local CHROM_SIZES="${10}"
+  local CANONICAL_CHROMS_REGEX="${11}"
+  local BROWSER_PRESET="${12}"
+  local PHASING_TRACK="${13}"
+  local ANNOTATION_METADATA="${14}"
+  local BLACKLIST_METADATA="${15}"
 
   assay="$(printf '%s' "${assay}" | tr '[:upper:]' '[:lower:]')"
 
@@ -723,12 +820,25 @@ process_sample() {
   local tmp_stats
 
   mkdir -p "${qc_dir}" "${trimmed_dir}" "${pairs_dir}" "${log_dir}" "${done_dir}" "${sample_tmp}"
+  [ -f "${REFERENCE_FASTA}" ] || die "${sample}: reference FASTA not found for ${REFERENCE_ID}: ${REFERENCE_FASTA}"
+  [ -f "${CHROM_SIZES}" ] || die "${sample}: chromosome sizes not found for ${REFERENCE_ID}: ${CHROM_SIZES}"
   sample_start_epoch="$(date '+%s')"
-  printf 'sample\tstatus\tstart_epoch\tend_epoch\truntime_seconds\n' > "${status_file}"
-  printf '%s\trunning\t%s\t\t\n' "${sample}" "${sample_start_epoch}" >> "${status_file}"
+  printf 'sample\treference_id\tassembly\tstatus\tstart_epoch\tend_epoch\truntime_seconds\n' > "${status_file}"
+  printf '%s\t%s\t%s\trunning\t%s\t\t\n' "${sample}" "${REFERENCE_ID}" "${GENOME_ASSEMBLY}" "${sample_start_epoch}" >> "${status_file}"
+  {
+    printf 'reference_id\t%s\n' "${REFERENCE_ID}"
+    printf 'species\t%s\n' "${REFERENCE_SPECIES}"
+    printf 'assembly\t%s\n' "${GENOME_ASSEMBLY}"
+    printf 'fasta\t%s\n' "${REFERENCE_FASTA}"
+    printf 'chrom_sizes\t%s\n' "${CHROM_SIZES}"
+    printf 'browser_preset\t%s\n' "${BROWSER_PRESET}"
+    printf 'phasing_track\t%s\n' "${PHASING_TRACK}"
+    printf 'annotation_metadata\t%s\n' "${ANNOTATION_METADATA}"
+    printf 'blacklist_metadata\t%s\n' "${BLACKLIST_METADATA}"
+  } > "${log_dir}/${sample}.reference.tsv"
   prepare_matrix_chrom_sizes "${matrix_chrom_sizes}"
 
-  log_msg "${sample}: assay=${assay}"
+  log_msg "${sample}: assay=${assay}, reference_id=${REFERENCE_ID}, assembly=${GENOME_ASSEMBLY}, browser_preset=${BROWSER_PRESET}"
 
   if ! step_done "${dedup_done}" "${sample}:dedup_pairs" "${dedup_pairs}"; then
     if bool_true "${RUN_FASTP:-true}"; then
@@ -747,8 +857,14 @@ process_sample() {
       trim_r2="${fastq_r2}"
     fi
 
+    if bool_true "${CHECK_TRIMMED_FASTQ_SYNC:-false}"; then
+      log_msg "${sample}: streaming alignment FASTQs to verify R1/R2 names and record counts"
+      python "${SCRIPT_DIR}/check_fastq_pair_names.py" "${trim_r1}" "${trim_r2}" \
+        > "${log_dir}/${sample}.fastq_sync_check.log"
+    fi
+
     log_msg "${sample}: aligning, parsing, sorting, and deduplicating pairs"
-    tmp_pairs="${dedup_pairs}.tmp.$$"
+    tmp_pairs="${dedup_pairs%.pairs.gz}.tmp.$$.pairs.gz"
     tmp_stats="${pairs_dir}/${sample}.dedup.stats.txt.tmp.$$"
     rm -f "${tmp_pairs}" "${tmp_stats}"
     bwa-mem2 mem ${BWA_EXTRA_ARGS:-} -t "${THREADS_ALIGN}" "${BWA_INDEX_PREFIX}" "${trim_r1}" "${trim_r2}" \
@@ -787,7 +903,7 @@ process_sample() {
   else
     select_expr="$(build_select_expr "${assay}")"
     log_msg "${sample}: selecting valid pairs with expression: ${select_expr}"
-    tmp_pairs="${valid_pairs}.tmp.$$"
+    tmp_pairs="${valid_pairs%.pairs.gz}.tmp.$$.pairs.gz"
     rm -f "${tmp_pairs}"
     pairtools select "${select_expr}" "${dedup_pairs}" \
       | filter_pairs_to_chrom_sizes "${matrix_chrom_sizes}" \
@@ -824,9 +940,9 @@ process_sample() {
 
   log_msg "${sample}: finished"
   sample_end_epoch="$(date '+%s')"
-  printf 'sample\tstatus\tstart_epoch\tend_epoch\truntime_seconds\n' > "${status_file}"
-  printf '%s\tsuccess\t%s\t%s\t%s\n' \
-    "${sample}" "${sample_start_epoch}" "${sample_end_epoch}" "$((sample_end_epoch - sample_start_epoch))" \
+  printf 'sample\treference_id\tassembly\tstatus\tstart_epoch\tend_epoch\truntime_seconds\n' > "${status_file}"
+  printf '%s\t%s\t%s\tsuccess\t%s\t%s\t%s\n' \
+    "${sample}" "${REFERENCE_ID}" "${GENOME_ASSEMBLY}" "${sample_start_epoch}" "${sample_end_epoch}" "$((sample_end_epoch - sample_start_epoch))" \
     >> "${status_file}"
 
   cleanup_sample_intermediates \
@@ -838,38 +954,49 @@ mkdir -p "${OUTDIR}" "${TMPDIR}"
 RUN_METADATA_DIR="${OUTDIR}/run_metadata"
 SAMPLE_MANIFEST="${RUN_METADATA_DIR}/sample_manifest.tsv"
 TECH_MANIFEST="${RUN_METADATA_DIR}/technical_replicates.tsv"
+MERGE_MANIFEST="${RUN_METADATA_DIR}/merge_manifest.tsv"
 mkdir -p "${RUN_METADATA_DIR}"
 
-printf 'sample\tassay\tcondition\tbiological_replicate\ttechnical_replicate\tmerge_group\tfastq_r1\tfastq_r2\tsample_dir\n' > "${SAMPLE_MANIFEST}"
-: > "${TECH_MANIFEST}"
+printf 'sample\tassay\treference_id\tspecies\tassembly\tbrowser_preset\tcondition\tbiological_replicate\ttechnical_replicate\tmerge_group\tfastq_r1\tfastq_r2\tsample_dir\n' > "${SAMPLE_MANIFEST}"
+printf 'merge_group\tsample\tpairs\treference_id\tassay\tcondition\tbiological_replicate\ttechnical_replicate\n' > "${TECH_MANIFEST}"
+printf 'merge_group\treference_id\tassembly\tbrowser_preset\n' > "${MERGE_MANIFEST}"
 
 active_jobs=0
 sample_failures=0
 sample_count=0
 
-while IFS=, read -r sample assay condition biological_replicate technical_replicate fastq_r1 fastq_r2 rest; do
-  sample="$(clean_csv_field "${sample}")"
-  assay="$(clean_csv_field "${assay}")"
-  condition="$(clean_csv_field "${condition}")"
-  biological_replicate="$(clean_csv_field "${biological_replicate}")"
-  technical_replicate="$(clean_csv_field "${technical_replicate}")"
-  fastq_r1="$(clean_csv_field "${fastq_r1}")"
-  fastq_r2="$(clean_csv_field "${fastq_r2}")"
+while IFS=$'\t' read -r sample assay reference_id condition biological_replicate technical_replicate fastq_r1 fastq_r2 requested_merge_group; do
 
   [ -n "${sample// }" ] || continue
 
   assay_group="$(printf '%s' "${assay}" | tr '[:upper:]' '[:lower:]')"
-  group_id="$(sanitize_id "${condition}_${assay_group}_B${biological_replicate}_tech_merged")"
+  if [ -n "${requested_merge_group}" ]; then
+    group_id="${requested_merge_group}"
+  else
+    group_id="$(sanitize_id "${condition}_${assay_group}_B${biological_replicate}_tech_merged")"
+  fi
   valid_pairs="${OUTDIR}/${sample}/03_pairs/${sample}.valid.mapq${MAPQ_THRESHOLD}.pairs.gz"
 
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "${sample}" "${assay_group}" "${condition}" "${biological_replicate}" "${technical_replicate}" \
-    "${group_id}" "${fastq_r1}" "${fastq_r2}" "${OUTDIR}/${sample}" \
-    >> "${SAMPLE_MANIFEST}"
-  printf '%s\t%s\t%s\n' "${group_id}" "${sample}" "${valid_pairs}" >> "${TECH_MANIFEST}"
+  load_reference "${reference_id}"
 
-  log_msg "${sample}: queueing sample worker"
-  process_sample "${sample}" "${assay_group}" "${fastq_r1}" "${fastq_r2}" &
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "${sample}" "${assay_group}" "${RESOLVED_REFERENCE_ID}" "${RESOLVED_SPECIES}" "${RESOLVED_ASSEMBLY}" "${RESOLVED_BROWSER_PRESET}" \
+    "${condition}" "${biological_replicate}" "${technical_replicate}" "${group_id}" "${fastq_r1}" "${fastq_r2}" "${OUTDIR}/${sample}" \
+    >> "${SAMPLE_MANIFEST}"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "${group_id}" "${sample}" "${valid_pairs}" "${RESOLVED_REFERENCE_ID}" "${assay_group}" "${condition}" "${biological_replicate}" "${technical_replicate}" \
+    >> "${TECH_MANIFEST}"
+  if ! awk -F'\t' -v group="${group_id}" 'NR > 1 && $1 == group {found=1} END{exit !found}' "${MERGE_MANIFEST}"; then
+    printf '%s\t%s\t%s\t%s\n' "${group_id}" "${RESOLVED_REFERENCE_ID}" "${RESOLVED_ASSEMBLY}" "${RESOLVED_BROWSER_PRESET}" >> "${MERGE_MANIFEST}"
+  fi
+
+  log_msg "${sample}: queueing sample worker for ${RESOLVED_REFERENCE_ID}"
+  process_sample \
+    "${sample}" "${assay_group}" "${fastq_r1}" "${fastq_r2}" \
+    "${RESOLVED_REFERENCE_ID}" "${RESOLVED_SPECIES}" "${RESOLVED_ASSEMBLY}" \
+    "${RESOLVED_FASTA}" "${RESOLVED_BWA_INDEX_PREFIX}" "${RESOLVED_CHROM_SIZES}" \
+    "${RESOLVED_CANONICAL_REGEX}" "${RESOLVED_BROWSER_PRESET}" "${RESOLVED_PHASING_TRACK}" \
+    "${RESOLVED_ANNOTATION_METADATA}" "${RESOLVED_BLACKLIST_METADATA}" &
   active_jobs=$((active_jobs + 1))
   sample_count=$((sample_count + 1))
 
@@ -879,7 +1006,7 @@ while IFS=, read -r sample assay condition biological_replicate technical_replic
     fi
     active_jobs=$((active_jobs - 1))
   fi
-done < <(tail -n +2 "${SAMPLESHEET}")
+done < <(tail -n +2 "${NORMALIZED_SAMPLESHEET}")
 
 while [ "${active_jobs}" -gt 0 ]; do
   if ! wait -n; then

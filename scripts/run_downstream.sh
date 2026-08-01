@@ -56,6 +56,13 @@ done
 # shellcheck source=/dev/null
 source "${CONFIG}"
 
+# The per-sample runner supplies the registry-resolved phasing track. An empty
+# override is intentional: eigs-cis still runs, but PC1 sign remains arbitrary.
+if [ "${MICROC2TRACKS_PHASING_TRACK_OVERRIDE+x}" = "x" ]; then
+  PHASING_TRACK="${MICROC2TRACKS_PHASING_TRACK_OVERRIDE}"
+fi
+REFERENCE_ID="${MICROC2TRACKS_REFERENCE_ID:-${DEFAULT_REFERENCE_ID:-${GENOME_ASSEMBLY:-unknown}}}"
+
 OUTPUT_BASE="${OUTPUT_BASE:-${OUTDIR}/${SAMPLE}}"
 DOWNSTREAM_DIR="${OUTPUT_BASE}/05_downstream"
 LOG_DIR="${OUTPUT_BASE}/logs"
@@ -68,6 +75,9 @@ mkdir -p \
   "${DOWNSTREAM_DIR}/loops" \
   "${DOWNSTREAM_DIR}/saddle" \
   "${LOG_DIR}"
+
+printf 'reference_id\t%s\nphasing_track\t%s\n' "${REFERENCE_ID}" "${PHASING_TRACK:-}" \
+  > "${DOWNSTREAM_DIR}/reference.tsv"
 
 if ! command -v cooltools >/dev/null 2>&1; then
   log_msg "cooltools not found; skipping cooltools downstream analyses"

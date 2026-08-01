@@ -288,7 +288,17 @@ bash scripts/prepare_reference.sh \
   -f /shared/references/mm39/GRCm39.primary_assembly.genome.fa \
   -a mm39 \
   -o /shared/references/mm39
+
+bash scripts/prepare_reference.sh \
+  -f /shared/references/hg38/GRCh38.primary_assembly.genome.fa \
+  -a hg38 \
+  -o /shared/references/hg38
 ```
+
+Copy `config/references.tsv` to a writable site configuration, edit the mm39 and
+hg38 paths, and keep the exact UCSC canonical names described in
+`09_multi_reference.md`. Preflight checks only references used by the current
+sample sheet, so a mouse-only run does not require hg38 to be installed.
 
 Always confirm that the chromosome names in the pair files match the chromosome sizes file. A mismatch can create an apparently valid but empty cooler.
 
@@ -300,7 +310,9 @@ cp /opt/microc2tracks/config/config_template.conf config.conf
 cp /opt/microc2tracks/config/samplesheet_template.csv samplesheet.csv
 ```
 
-Edit `config.conf` so `OUTDIR`, `TMPDIR`, `REFERENCE_FASTA`, `CHROM_SIZES`, and `JUICER_TOOLS_JAR` match the server.
+Edit `config.conf` so `OUTDIR`, `TMPDIR`, `REFERENCE_REGISTRY`, and
+`JUICER_TOOLS_JAR` match the server. Existing mouse-only global reference values
+may remain as default-mm39 overrides.
 
 If the BWA-MEM2 index was created with the same FASTA path, keep:
 

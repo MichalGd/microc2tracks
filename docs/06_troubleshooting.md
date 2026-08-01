@@ -179,3 +179,40 @@ conda create -p /opt/conda/envs/microc2tracks-downstream -c conda-forge -c bioco
 ## Micro-C And Hi-C Look Different At The Same Resolution
 
 This is expected. Compare matrices at matched resolution and matched valid-contact depth when making quantitative claims. Use observed/expected or distance-aware summaries for cross-assay comparisons.
+
+## Unknown Or Wrong Reference
+
+Only `mouse`, `mm39`, `human`, and `hg38` are accepted by the shipped registry.
+An explicit human row never falls back to mouse. Check normalization without
+requiring FASTQs:
+
+```bash
+python scripts/validate_samplesheet.py \
+  --reference-registry config/references.tsv \
+  config/samplesheet.csv
+```
+
+If preflight reports FASTA/chromosome-size mismatch, regenerate chromosome
+sizes from the exact FASTA `.fai`. `1` versus `chr1`, `MT`/`chrMT` versus
+`chrM`, alt contigs, or NCBI accession names are not silently renamed.
+
+## Outputs Rebuild After A Reference Change
+
+This is intentional. Sentinels contain `reference_id` and assembly. A mismatch
+prevents stale pairs/matrices/downstream outputs from being reused. Prefer a new
+`OUTDIR`; otherwise archive and remove the affected sample and merged group.
+Legacy missing-sentinel adoption is limited to mm39 and can be disabled with
+`ALLOW_LEGACY_MM39_RESUME=false`.
+
+## BWA Reports Paired Reads With Different Names
+
+First verify raw checksums and identify whether raw or trimmed pairs differ. The
+optional safeguard below fully streams the alignment FASTQs before BWA:
+
+```bash
+CHECK_TRIMMED_FASTQ_SYNC="true"
+```
+
+Use the production defaults `THREADS_FASTP="8"` and `MAX_PARALLEL_SAMPLES="2"` while
+diagnosing. A prior high-thread operational incident motivates the check but is
+not proof of a universal `fastp` defect.

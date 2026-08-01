@@ -2,6 +2,11 @@
 
 ## Upstream Defaults
 
+Reference selection is resolved once per row through `config/references.tsv`.
+The same resolved assembly/path bundle is then used by BWA-MEM2, Pairtools,
+Cooler, Juicer, downstream analysis, and browser metadata; species conditionals
+are not scattered through the processing commands.
+
 | Step | Default | Notes |
 |---|---|---|
 | QC/trimming | `fastp` | Already present in the existing environment. Fast and simple paired-end QC. |

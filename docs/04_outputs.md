@@ -80,9 +80,15 @@ Keep `.valid.mapq30.pairs.gz` files because they are the most reusable intermedi
 Trimmed FASTQ, temporary Juicer pair files, raw `.hic`, raw `.mcool`, and single-resolution `.cool` files are reproducible from retained upstream files. Their retention is controlled in `config.conf`.
 
 `logs/done/*.done` files are resumability sentinels. They record successful
-step completion after outputs exist. Current runners can bootstrap missing
-sentinels from valid existing outputs, which lets older completed runs resume
-without recomputation.
+step completion, canonical `reference_id`, and assembly after outputs exist. A
+different or missing reference does not resume. As a backward-compatibility
+exception, complete legacy mm39 outputs without sentinels can be adopted when
+`BOOTSTRAP_SENTINELS=true` and `ALLOW_LEGACY_MM39_RESUME=true`.
+
+`run_metadata/sample_manifest.tsv`, `technical_replicates.tsv`, and
+`merge_manifest.tsv` record reference identity, assembly/browser metadata, and
+merge membership. Each sample or merged group also has `logs/*.reference.tsv`;
+final sample and merge summaries carry the same reference fields.
 
 By default, `RUN_PRELIM_DOWNSTREAM=true`, so light downstream outputs are written
 under `05_downstream/` for each technical replicate and for each merged
@@ -120,7 +126,7 @@ This is the `.hic` route documented by UCSC for `track type=hic` custom tracks a
 - The `.hic` file was produced successfully by Juicer Tools.
 - The matrix-specific `{sample}.matrix.chrom.sizes` file used by `juicer_tools pre` matches the chromosome names in the contact pairs.
 - `FILTER_CANONICAL_CHROMS=true` is enabled, or `CHROM_SIZES` already contains only UCSC-compatible canonical chromosomes.
-- The chromosome names match the UCSC genome database you want to view. For UCSC `mm39`, this usually means `chr1`, `chr2`, etc.; Ensembl-style names such as `1`, `2`, etc. may not display on the UCSC `mm39` browser unless you use a matching custom assembly hub.
+- The chromosome names match the selected browser database: mm39 uses the mouse preset and hg38 uses the human preset. The shipped definitions require UCSC `chr1`/`chrM` naming and never rename matrix chromosomes.
 - The `.hic` file is hosted at a public or intranet-accessible `http`, `https`, or `ftp` URL.
 - UCSC can reach that URL through `bigDataUrl`.
 
@@ -130,7 +136,7 @@ If `PUBLIC_HIC_BASE_URL` is set in `config.conf`, the workflow writes:
 results/{sample}/04_matrices/{sample}.ucsc.hic.track.txt
 ```
 
-Example:
+Example (the generated file also starts with a reference/browser metadata comment):
 
 ```text
 track type=hic name="microC1" description="microC1 normalized Hi-C/Micro-C contacts" bigDataUrl=https://server.example.org/hic/microC1.norm.hic

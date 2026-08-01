@@ -1,1 +1,1 @@
-sample,assay,condition,biological_replicate,technical_replicate,fastq_r1,fastq_r2
+sample,assay,reference_genome,condition,biological_replicate,technical_replicate,fastq_r1,fastq_r2

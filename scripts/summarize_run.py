@@ -46,12 +46,10 @@ def read_technical_manifest(path: Path) -> dict[str, list[str]]:
     if not path.exists():
         return groups
 
-    with path.open(encoding="utf-8") as handle:
-        for line in handle:
-            fields = line.rstrip("\n").split("\t")
-            if len(fields) < 3:
-                continue
-            group, sample, _pairs = fields[:3]
+    for row in read_tsv(path):
+        group = row.get("merge_group", "")
+        sample = row.get("sample", "")
+        if group and sample:
             groups.setdefault(group, []).append(sample)
 
     return groups
@@ -216,6 +214,10 @@ def sample_summary_rows(
         summary = {
             "sample": sample,
             "assay": row.get("assay", ""),
+            "reference_id": row.get("reference_id", ""),
+            "species": row.get("species", ""),
+            "assembly": row.get("assembly", ""),
+            "browser_preset": row.get("browser_preset", ""),
             "condition": row.get("condition", ""),
             "biological_replicate": row.get("biological_replicate", ""),
             "technical_replicate": row.get("technical_replicate", ""),
@@ -247,6 +249,7 @@ def sample_summary_rows(
 
 def merge_summary_rows(
     groups: dict[str, list[str]],
+    merge_metadata: dict[str, dict[str, str]],
     outdir: Path,
     mapq: str,
     base_resolution: str,
@@ -254,6 +257,7 @@ def merge_summary_rows(
     rows: list[dict[str, str]] = []
 
     for group, samples in sorted(groups.items()):
+        metadata = merge_metadata.get(group, {})
         merge_dir = outdir / "merged" / group
         pairs_dir = merge_dir / "03_pairs"
         matrix_dir = merge_dir / "04_matrices"
@@ -266,6 +270,9 @@ def merge_summary_rows(
         rows.append(
             {
                 "merge_group": group,
+                "reference_id": metadata.get("reference_id", ""),
+                "assembly": metadata.get("assembly", ""),
+                "browser_preset": metadata.get("browser_preset", ""),
                 "technical_replicate_count": str(len(samples)),
                 "samples": ",".join(samples),
                 "status": "created" if norm_mcool.exists() or norm_hic.exists() else "not_created",
@@ -399,6 +406,7 @@ def main() -> None:
     parser.add_argument("-o", "--outdir", required=True, type=Path)
     parser.add_argument("--sample-manifest", required=True, type=Path)
     parser.add_argument("--technical-manifest", required=True, type=Path)
+    parser.add_argument("--merge-manifest", required=True, type=Path)
     args = parser.parse_args()
 
     config = parse_config(args.config)
@@ -410,8 +418,13 @@ def main() -> None:
 
     manifest_rows = read_tsv(args.sample_manifest)
     groups = read_technical_manifest(args.technical_manifest)
+    merge_metadata = {
+        row.get("merge_group", ""): row
+        for row in read_tsv(args.merge_manifest)
+        if row.get("merge_group")
+    }
     sample_rows = sample_summary_rows(manifest_rows, run_outdir, mapq, base_resolution)
-    merge_rows = merge_summary_rows(groups, run_outdir, mapq, base_resolution)
+    merge_rows = merge_summary_rows(groups, merge_metadata, run_outdir, mapq, base_resolution)
     file_rows = file_manifest_rows(sample_rows, merge_rows, run_outdir, mapq)
 
     write_tsv(args.outdir / "microc2tracks_sample_summary.tsv", sample_rows)

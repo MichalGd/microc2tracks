@@ -21,6 +21,11 @@ Light mode skips:
 
 ## Configuration
 
+In per-sample runs, reference-registry `phasing_track` overrides the legacy
+global `PHASING_TRACK` for that sample or merge. An empty registry value is
+deliberate: compartment eigenvectors are still computed but PC1 sign is
+arbitrary. All other scientific defaults below are shared across references.
+
 The relevant config block is:
 
 ```bash

@@ -5,28 +5,29 @@
 Required columns:
 
 ```csv
-sample,assay,condition,biological_replicate,technical_replicate,fastq_r1,fastq_r2
+sample,assay,reference_genome,condition,biological_replicate,technical_replicate,fastq_r1,fastq_r2
 ```
 
 Column meanings:
 
 - `sample`: unique technical replicate ID, used in output file names
 - `assay`: `microc` or `hic`
+- `reference_genome`: controlled alias `mouse`, `mm39`, `human`, or `hg38`
 - `condition`: free text metadata, for example `basal` or `treated`
 - `biological_replicate`: biological replicate number within an assay and condition
 - `technical_replicate`: technical replicate number within one biological replicate; use `1` when there is no technical replicate
 - `fastq_r1`: absolute or project-relative path to R1 FASTQ
 - `fastq_r2`: absolute or project-relative path to R2 FASTQ
 
-Each row is processed independently first and produces its own `.mcool` and `.hic` outputs. After all rows finish, rows with the same `assay`, `condition`, and `biological_replicate` are treated as technical replicates. If a group has two or more technical replicates, the workflow merges the filtered pair files and rebuilds merged `.mcool` and `.hic` outputs.
+Each row is processed independently first and produces its own `.mcool` and `.hic` outputs. After all rows finish, rows with the same reference, `assay`, `condition`, and `biological_replicate` are treated as technical replicates. Different references are never merged. An optional safe `merge_group` column can name a group explicitly.
 
 Example:
 
 ```csv
-sample,assay,condition,biological_replicate,technical_replicate,fastq_r1,fastq_r2
-microC_B1_T1,microc,basal,1,1,/data/project/PMK_Basal_MicroC_B1_T1_R1.fq.gz,/data/project/PMK_Basal_MicroC_B1_T1_R2.fq.gz
-microC_B1_T2,microc,basal,1,2,/data/project/PMK_Basal_MicroC_B1_T2_R1.fq.gz,/data/project/PMK_Basal_MicroC_B1_T2_R2.fq.gz
-microC_B2_T1,microc,basal,2,1,/data/project/PMK_Basal_MicroC_B2_T1_R1.fq.gz,/data/project/PMK_Basal_MicroC_B2_T1_R2.fq.gz
+sample,assay,reference_genome,condition,biological_replicate,technical_replicate,fastq_r1,fastq_r2
+microC_B1_T1,microc,mouse,basal,1,1,/data/project/PMK_Basal_MicroC_B1_T1_R1.fq.gz,/data/project/PMK_Basal_MicroC_B1_T1_R2.fq.gz
+microC_B1_T2,microc,mm39,basal,1,2,/data/project/PMK_Basal_MicroC_B1_T2_R1.fq.gz,/data/project/PMK_Basal_MicroC_B1_T2_R2.fq.gz
+human_B1_T1,microc,human,human_control,1,1,/data/project/Human_MicroC_B1_T1_R1.fq.gz,/data/project/Human_MicroC_B1_T1_R2.fq.gz
 ```
 
 In this example, `microC_B1_T1` and `microC_B1_T2` are processed separately and then merged as `basal_microc_B1_tech_merged`. `microC_B2_T1` is processed separately and is not copied into a redundant merged output because it has only one technical replicate.
@@ -49,7 +50,14 @@ After this cleanup, preflight and the main runner use stricter validation and re
 
 ## Main Config Values
 
-`REFERENCE_FASTA` and `CHROM_SIZES` must use matching chromosome names.
+`REFERENCE_REGISTRY` points to the centralized TSV. Each reference row supplies
+its FASTA, BWA-MEM2 index prefix, chromosome sizes, canonical regex, browser
+preset, phasing track, and optional annotation/blacklist metadata. The FASTA
+`.fai` and chromosome sizes must contain exactly matching names and lengths.
+
+The legacy `REFERENCE_FASTA`, `BWA_INDEX_PREFIX`, `CHROM_SIZES`,
+`CANONICAL_CHROMS_REGEX`, and `PHASING_TRACK` values override only the default
+reference row, preserving old mouse configs. See `09_multi_reference.md`.
 
 Good:
 
@@ -67,7 +75,8 @@ chrom sizes: mchr1
 
 `BASE_RESOLUTION` controls the first `.cool` file. For deep Micro-C, 1000 is practical. For lower-depth Hi-C, 5000 or 10000 may be safer.
 
-`BWA_INDEX_PREFIX` tells the pipeline where the BWA-MEM2 index is. In the usual case, it is the same as `REFERENCE_FASTA`:
+Within each registry row, `bwa_index_prefix` tells the pipeline where the
+BWA-MEM2 index is. It usually equals that row's FASTA:
 
 ```bash
 REFERENCE_FASTA="/shared/references/mm39/GRCm39.primary_assembly.genome.fa"
@@ -120,7 +129,7 @@ The default `FASTP_TIMEOUT_SECONDS="0"` disables the timeout. Use a large value 
 Thread settings are split by step:
 
 ```bash
-THREADS_FASTP="12"
+THREADS_FASTP="8"
 THREADS_ALIGN="32"
 THREADS_SORT="16"
 THREADS_MATRIX="32"
@@ -141,13 +150,17 @@ For exploratory runs, fewer `.hic` normalizations or coarser `HIC_RESOLUTIONS`
 can save substantial time.
 
 The runner writes per-step sentinel files under each `logs/done/` directory.
-If valid outputs already exist, missing sentinels are bootstrapped by default:
+Sentinels record canonical reference identity. A mismatched or legacy human
+sentinel is never reused. Missing sentinels can be bootstrapped only for legacy
+mm39 outputs by default:
 
 ```bash
 BOOTSTRAP_SENTINELS="true"
+ALLOW_LEGACY_MM39_RESUME="true"
 ```
 
-This improves resumability without forcing old completed runs to recompute.
+Changing reference invalidates reuse. Prefer a new output directory; otherwise
+archive and remove the affected sample and merged-group outputs before rerunning.
 
 Light preliminary downstream analysis is enabled by default:
 
@@ -195,15 +208,8 @@ to the tool documentation.
 
 ## Parallel Execution
 
-By default, the workflow processes one sample-sheet row at a time:
-
-```bash
-MAX_PARALLEL_SAMPLES="1"
-MAX_PARALLEL_MATRIX="1"
-MAX_PARALLEL_HIC="1"
-```
-
-On a quiet large-memory server, a practical first parallel setting is:
+By default, the workflow processes two sample-sheet rows at a time while
+serializing matrix and `.hic` work:
 
 ```bash
 MAX_PARALLEL_SAMPLES="2"
@@ -247,12 +253,14 @@ By default, the workflow filters valid pairs and matrix chromosome sizes to cano
 
 ```bash
 FILTER_CANONICAL_CHROMS="true"
-CANONICAL_CHROMS_REGEX="^(chr)?([1-9][0-9]?|X|Y|M|MT)$"
+# Registry values:
+# mm39 ^chr([1-9]|1[0-9]|X|Y|M)$
+# hg38 ^chr([1-9]|1[0-9]|2[0-2]|X|Y|M)$
 ```
 
 This removes alt, random, unplaced, and other non-canonical contigs from the matrix and `.hic` outputs. This is recommended for UCSC Genome Browser compatibility.
 
-Important: this filter removes non-canonical contigs but does not rename chromosomes. For UCSC `mm39`, use a reference and chromosome sizes file with UCSC-style names such as `chr1`, `chr2`, and `chrX`. Ensembl-style names such as `1`, `2`, and `X` may still be incompatible with the UCSC `mm39` browser even after non-canonical contigs are removed.
+Important: this filter removes non-canonical contigs but does not rename chromosomes. The shipped mm39 and hg38 definitions require UCSC-style `chr1` names and deliberate `chrM`. Names such as `1`, `MT`, `chrMT`, or `NC_000001.11` require a distinct explicit registry/custom-browser design and are not silently rewritten. `chrY` stays in both matrix schemas, including for expected XX samples.
 
 ## Assay Behavior
 

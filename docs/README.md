@@ -10,6 +10,8 @@ flowchart TD
   E --> G["06_troubleshooting.md"]
   C --> H["07_github_setup.md"]
   E --> I["08_light_downstream_analysis.md"]
+  D --> J["09_multi_reference.md"]
+  J --> K["10_browser_tracks.md"]
 ```
 
 | Document | Purpose |
@@ -22,3 +24,5 @@ flowchart TD
 | `06_troubleshooting.md` | Common failure modes and fixes. |
 | `07_github_setup.md` | GitHub repository creation and upload instructions. |
 | `08_light_downstream_analysis.md` | Default light downstream analysis, TAD calls, compartments, outputs, and interpretation. |
+| `09_multi_reference.md` | mm39/hg38 registry, sample sheets, chromosome policy, migration, preflight, and resumability. |
+| `10_browser_tracks.md` | Assembly-explicit UCSC/HiGlass packaging and chromosome-name behavior. |

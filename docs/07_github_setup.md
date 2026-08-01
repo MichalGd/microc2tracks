@@ -1,55 +1,52 @@
-# GitHub Repository Setup
+# Manual GitHub Update Procedure
 
-## Option 1: Create On GitHub First
+These are operator instructions only. The candidate preparation process does not
+push, create a branch, open a pull request, or modify the remote repository.
 
-1. Open GitHub and create a new empty repository named `microc2tracks`.
-2. Do not initialize it with a README if you are uploading this repository as-is.
-3. On the server or local machine:
+1. Verify the archive checksum against `SHA256SUMS.txt` and inspect
+   `UPLOAD_MANIFEST.txt`.
+2. Clone the intended repository into a new directory. Do not reuse the local
+   baseline whose configured origin contains the `micorc2tracks` typo.
+3. Confirm the remote and starting commit:
 
 ```bash
-cd microc2tracks
-git init
-git add .
-git commit -m "Initial microc2tracks workflow"
-git branch -M main
-git remote add origin https://github.com/MichalGd/microc2tracks.git
-git push -u origin main
+git clone https://github.com/MichalGd/microc2tracks.git microc2tracks-review
+cd microc2tracks-review
+git remote -v
+git status --short
+git log -1 --oneline
 ```
 
-## Option 2: Using GitHub CLI
+4. Create a review branch locally if desired, then copy only paths listed in
+   `UPLOAD_MANIFEST.txt` from the extracted candidate. Do not copy `.git`,
+   caches, the external archive/checksum file, or the external comparison patch.
+5. Review and test before committing:
 
 ```bash
-cd microc2tracks
-git init
-git add .
-git commit -m "Initial microc2tracks workflow"
-gh repo create MichalGd/microc2tracks --public --source=. --remote=origin --push
-```
-
-Use `--private` instead of `--public` if the repository should not be public yet.
-
-## Upload From The Packaged Archive
-
-```bash
-tar -xzf microc2tracks_20260606.tar.gz
-cd microc2tracks
-git init
-git add .
-git commit -m "Initial microc2tracks workflow"
-git branch -M main
-git remote add origin https://github.com/MichalGd/microc2tracks.git
-git push -u origin main
-```
-
-## Recommended First Checks After Clone
-
-```bash
+git status --short
+git diff --check
+git diff --stat
 bash tests/check_bash_syntax.sh
-python -m py_compile scripts/validate_samplesheet.py scripts/compare_matrices.py scripts/plot_ps_curves.py
-python scripts/validate_samplesheet.py config/samplesheet_example.csv
+bash tests/test_reference_sentinel.sh
+python -m py_compile scripts/*.py tests/test_multireference.py
+python -m unittest discover -s tests -p 'test_*.py' -v
+python scripts/reference_registry.py validate --registry config/references.tsv
+python scripts/validate_samplesheet.py \
+  --reference-registry config/references.tsv \
+  config/samplesheet_example.csv
 ```
 
-## Linux Line Endings
+6. Review `config/references.tsv` carefully: its `/shared/references/...` paths
+   are public examples, not proof of an installed server layout.
+7. Commit with a focused message, inspect the commit, and only then push under
+   the repository owner's normal review policy:
 
-The repository includes `.gitattributes` so shell scripts are stored with LF line endings. This matters because scripts edited on Windows can otherwise fail on Linux with `bad interpreter` or `$'\r': command not found`.
+```bash
+git add -- $(cat UPLOAD_MANIFEST.txt)
+git commit -m "Add per-sample mm39 and hg38 reference support"
+git show --stat --oneline HEAD
+# Push only after explicit authorization and normal project review.
+```
 
+The repository includes `.gitattributes` so shell scripts remain LF-terminated
+when reviewed on Windows.
