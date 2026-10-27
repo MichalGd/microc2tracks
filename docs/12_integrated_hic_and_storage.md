@@ -1,4 +1,4 @@
-# Integrated Hi-C, joint deduplication and optional storage roots (3.0.0-rc2)
+# Integrated Hi-C, joint deduplication and optional storage roots (3.0.0-rc3)
 
 This is one update to **microc2tracks**, not a second Hi-C pipeline. The existing
 commands remain:

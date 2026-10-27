@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased - 3.0.0-rc3 (2026-10-27)
+
+- Added a shared Linux launcher for a read-only versioned installation outside
+  user homes, using an existing environment without conda activation. It resolves
+  symlinks to the selected release, preserves arguments/current directory and
+  avoids user-site/PYTHONPATH contamination and source-tree bytecode writes.
+- Added `check-access` for current-account tool, code, reference/index and JAR
+  permissions, with explicit warnings for unchecked resources and home paths.
+  It makes no changes and does not claim every account or scientific validation.
+- Replaced outdated installation recipes with administrator-only code staging,
+  cross-account checks and user/project-owned output/scratch/cache guidance.
+  Existing environments, running jobs and genome indexes are not changed.
+- Added five focused launcher/access regressions. No scientific filtering,
+  deduplication or matrix algorithms were changed by this shared-install update.
+
 ## Unreleased - 3.0.0-rc2 (2026-10-27)
 
 - Added `--mode refilter-deduplicated` to the existing runner/preflight, also

@@ -4,7 +4,7 @@
 
 The first implementation follows the style of the existing Shell repositories `fastq2tracks` and `rnaseq2tracksP`: a top-level runner, `config/`, `docs/`, `examples/`, `scripts/`, `environment.yml`, and simple tests.
 
-Version **3.0.0-rc2** implements integrated restriction Hi-C, user-selected joint
+Version **3.0.0-rc3** implements integrated restriction Hi-C, user-selected joint
 deduplication, disjoint pooling and optional output disks. Read the
 [integration/storage guide](docs/12_integrated_hic_and_storage.md) before upgrading.
 It preserves the [earlier server fixes](docs/11_server_baseline_sync.md).
@@ -15,6 +15,13 @@ Existing mapped, deduplicated `.pairs`/`.pairs.gz` can be reprocessed with
 `--mode refilter-deduplicated`, skipping alignment and deduplication. See the
 [refilter mode guide](docs/13_refilter_deduplicated_inputs.md) for its separate
 CSV schema, read-only input safeguards and restriction/distance settings.
+
+For all-user Linux access, install a read-only version under `/opt/microc2tracks`
+and use the [shared launcher and permission checks](docs/14_shared_multiuser_installation.md).
+It reuses an existing environment without conda activation or maintainer-home
+initialization. Configs, outputs, scratch and writable caches belong to each
+user/project, not the shared installation. Verify actual shared resources from
+another account before claiming server-wide access.
 
 ## Workflow Schematic
 
@@ -151,6 +158,11 @@ human, mixed-run, migration, chromosome-policy, and resumability examples.
 
 ## Quick Start
 
+The following is a fresh/development installation example, not a shared-server
+upgrade recipe. Existing shared installations should follow
+[the versioned deployment guide](docs/14_shared_multiuser_installation.md) and
+reuse working environments/indexes without changing active analyses.
+
 ```bash
 git clone https://github.com/MichalGd/microc2tracks.git
 cd microc2tracks
@@ -189,34 +201,13 @@ This still uses `conda`; it only changes the dependency solver.
 
 ## Shared Server Environment
 
-For an installation available to all users, create the conda environment at a shared prefix instead of using a user-local named environment:
-
-```bash
-sudo mkdir -p /opt
-sudo git clone https://github.com/MichalGd/microc2tracks.git /opt/microc2tracks
-cd /opt/microc2tracks
-
-# Load conda from wherever it is installed on this server.
-source "$(conda info --base)/etc/profile.d/conda.sh"
-
-conda env create \
-  -p /opt/conda/envs/microc2tracks \
-  -f environment.yml
-
-conda activate /opt/conda/envs/microc2tracks
-```
-
-Then make the pipeline, environment, references, and Juicer Tools readable/executable:
-
-```bash
-sudo chgrp -R bioinfo /opt/microc2tracks /opt/conda/envs/microc2tracks
-sudo chmod -R a+rX /opt/microc2tracks /opt/conda/envs/microc2tracks
-sudo chmod -R a+rX /shared/references /shared/software/juicer_tools
-```
-
-See `docs/02_installation_server.md` for optional `/usr/local/bin` launchers.
-
-The server guide also includes a tested `biolserv` installation recipe covering `/opt` cloning, `/opt/conda/envs/microc2tracks`, `libmamba` solver setup, permissions without a `bioinfo` group, and shared launchers.
+Install versioned code outside user homes and use the existing shared environment
+when compatible. The [shared installation guide](docs/14_shared_multiuser_installation.md)
+provides the administrator-owned `/opt` layout, `/usr/local/bin` launcher,
+cross-account access checks and project-owned outputs. Do not create duplicate
+environments/indexes, recursively change active permissions or overwrite old
+launchers while jobs are running. All-user server permissions and real scientific
+tool behavior have not been validated merely by preparing this candidate.
 
 For downstream analysis of one matrix:
 

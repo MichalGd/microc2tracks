@@ -1,5 +1,30 @@
 # Test Report
 
+## Shared-installation candidate 3.0.0-rc3: 2026-10-27
+
+- Full local suite: **61 discovered, 57 passed, four real-tool tests skipped**.
+- Five new tests cover shared-prefix selection without conda activation,
+  run/preflight/merge/check-access routing, argument/working-directory preservation,
+  user-site/PYTHONPATH isolation, missing-Python failure, no installed-source writes
+  on the actual version route, and read-only reference/JAR permission checks.
+- Bash syntax, reference-sentinel regressions and Python AST syntax checks passed.
+  Source-tree identity snapshots confirm no bytecode/new source artifacts from the
+  launcher. Tests used Windows/Git Bash, not another actual Linux login identity.
+- No scientific algorithms were changed by the shared-installation update.
+  The four existing toy scientific tests remain unexecuted here. Cross-account
+  access on the real server has not been tested or claimed.
+
+For this server upgrade, **reuse the existing environment** after checking it;
+do not follow historical environment-creation commands below against an active
+environment. Existing imports/version checks are encouraging but not end-to-end
+validation. See [shared deployment](docs/14_shared_multiuser_installation.md)
+for root-owned code staging outside user homes and other-account access checks.
+
+After reviewing resource availability, run the opt-in real-tool tests with the
+existing environment and actual shared JAR path, not production data. They create
+only a tiny temporary synthetic reference/index. Any failure is a release blocker
+to investigate, not permission to update packages or modify active jobs.
+
 ## Refilter mode candidate 3.0.0-rc2: 2026-10-27
 
 Extends local candidate `d158d3f` with the agreed already-deduplicated input mode.

@@ -14,6 +14,7 @@ microc2tracks/
     config_storage_example.conf
     config_template.conf
     hic_protocols.json
+    launcher.conf.example
     references.tsv
     samplesheet_dovetail_example.csv
     samplesheet_example.csv
@@ -34,6 +35,7 @@ microc2tracks/
     11_server_baseline_sync.md
     12_integrated_hic_and_storage.md
     13_refilter_deduplicated_inputs.md
+    14_shared_multiuser_installation.md
     README.md
   environment.yml
   envs/
@@ -47,6 +49,7 @@ microc2tracks/
     artifact_state.py
     call_tads_from_insulation.py
     check_fastq_pair_names.py
+    check_shared_access.py
     compare_matrices.py
     compare_saddle_plots.py
     export_insulation_bedgraph.py
@@ -67,6 +70,7 @@ microc2tracks/
     run_downstream.sh
     run_plan.py
     sanitize_text_inputs.py
+    shared_launcher.sh
     summarize_run.py
     validate_pairs_reference.py
     validate_samplesheet.py
@@ -79,3 +83,4 @@ microc2tracks/
     test_reference_sentinel.sh
     test_refilter_mode.py
     test_server_hotfixes.py
+    test_shared_installation.py

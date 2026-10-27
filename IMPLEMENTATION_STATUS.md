@@ -1,4 +1,4 @@
-# Integrated update handoff: 3.0.0-rc2
+# Integrated update handoff: 3.0.0-rc3
 
 Prepared: 2026-10-27. Base: `0ce6761` (published server-source synchronization).
 Local branch: `feature/integrated-hic-storage-20261027`.
@@ -18,15 +18,18 @@ Local branch: `feature/integrated-hic-storage-20261027`.
 - Explicit refilter-deduplicated run mode for existing mapped pairs: no alignment,
   parsing or deduplication, read-only sources/indexes, new output tree, import QC
   and the shared restriction/distance/matrix path. See [the refilter guide](docs/13_refilter_deduplicated_inputs.md).
+- Read-only shared installation outside user homes, a version-resolving launcher
+  using the existing environment without conda activation, and explicit
+  current-account access checks. See [the multi-user guide](docs/14_shared_multiuser_installation.md).
 
 ## Verification and release gate
 
-52 local tests passed; four opt-in real-tool tests were skipped. Python
+57 local tests passed; four opt-in real-tool tests were skipped. Python
 compilation, Bash syntax/sentinel checks, shell help routes, example CSV validation,
 browser help and Git whitespace checks passed. The runner contract includes
 mocked external commands, not proof of real BWA/pairtools/cooler/Java behavior.
 
-Before promotion, solve the isolated Linux target environment and run the four
+Before promotion, validate the existing shared Linux environment and run the four
 tiny real-tool tests documented in [TEST_REPORT.md](TEST_REPORT.md). This checks
 FASTQ-to-matrix behavior and raw `.mcool`/`.hic` equality without production data
 or extensive benchmarking. Local Docker's Linux engine was unavailable, so those
@@ -37,6 +40,11 @@ production-data reruns were performed. GitHub main was not changed by preparing
 this candidate. Original planning documents and prior baseline directories were
 preserved. Do not overwrite the active server installation with an unvalidated
 candidate.
+
+The shared launcher and access utility were checked locally, not on biolserv.
+Other-account access to the existing environment, references, indexes and JAR
+remains an explicit server deployment gate. Only the new release gets new
+ownership/permissions; no recursive changes to active resources are prescribed.
 
 See [the user guide](docs/12_integrated_hic_and_storage.md),
 [configuration template](config/config_template.conf), and

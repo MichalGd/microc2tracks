@@ -12,6 +12,7 @@ UPLOAD_MANIFEST.txt
 config/config_storage_example.conf
 config/config_template.conf
 config/hic_protocols.json
+config/launcher.conf.example
 config/references.tsv
 config/samplesheet_dovetail_example.csv
 config/samplesheet_example.csv
@@ -31,6 +32,7 @@ docs/10_browser_tracks.md
 docs/11_server_baseline_sync.md
 docs/12_integrated_hic_and_storage.md
 docs/13_refilter_deduplicated_inputs.md
+docs/14_shared_multiuser_installation.md
 docs/README.md
 environment.yml
 envs/downstream_optional.yml
@@ -41,6 +43,7 @@ examples/run_refilter_deduplicated_example.sh
 scripts/artifact_state.py
 scripts/call_tads_from_insulation.py
 scripts/check_fastq_pair_names.py
+scripts/check_shared_access.py
 scripts/compare_matrices.py
 scripts/compare_saddle_plots.py
 scripts/export_insulation_bedgraph.py
@@ -61,6 +64,7 @@ scripts/refilter_inputs.py
 scripts/run_downstream.sh
 scripts/run_plan.py
 scripts/sanitize_text_inputs.py
+scripts/shared_launcher.sh
 scripts/summarize_run.py
 scripts/validate_pairs_reference.py
 scripts/validate_samplesheet.py
@@ -72,3 +76,4 @@ tests/test_real_tools.py
 tests/test_reference_sentinel.sh
 tests/test_refilter_mode.py
 tests/test_server_hotfixes.py
+tests/test_shared_installation.py

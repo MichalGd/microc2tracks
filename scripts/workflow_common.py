@@ -15,7 +15,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-VERSION = "3.0.0-rc2"
+VERSION = "3.0.0-rc3"
 DEFAULTS = {
     "WORKFLOW_MODE": "fastq",
     "OUTDIR": "results", "TMPDIR": "", "PAIRS_OUTDIR": "", "MATRIX_OUTDIR": "",

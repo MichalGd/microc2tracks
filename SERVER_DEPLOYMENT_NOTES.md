@@ -1,4 +1,4 @@
-# Server Deployment Notes: 3.0.0-rc2
+# Server Deployment Notes: 3.0.0-rc3
 
 This is a complete feature candidate, prepared for staged validation. No server
 installation or running analysis was changed. The real-tool release gate in
@@ -7,17 +7,22 @@ installation or running analysis was changed. The real-tool release gate in
 ## Safe staging
 
 1. Keep the active installation and its environment untouched.
-2. Extract the complete candidate archive to a new versioned staging directory.
+2. Follow [the shared multi-user installation guide](docs/14_shared_multiuser_installation.md):
+   extract into a new root-owned release under `/opt/microc2tracks/versions/3.0.0-rc3`,
+   not a user's home. Add only a version-specific command first; do not replace
+   an existing default launcher while jobs may use it.
    Deploy the entire set in UPLOAD_MANIFEST.txt, not selected shell scripts.
-3. Create a separate environment, for example:
-
-   ```bash
-   conda env create -n microc2tracks-3.0.0-rc2 -f environment.yml
-   conda activate microc2tracks-3.0.0-rc2
-   ```
+3. Reuse the existing shared environment after imports/functional checks. Do not
+   create/clone/update packages or change its permissions while analyses run.
+   The new shared launcher directly uses its Python/bin directory, without conda
+   activation or a maintainer-home dependency. `environment.yml` is a fresh-install
+   target, not an instruction to replace the working server environment.
+   Verify access as another unprivileged account with `check-access`, including
+   actual registry/JAR paths. Keep shared software non-writable by ordinary users;
+   use user/project-owned configs, unique output roots, scratch and writable caches.
 
 4. Run the small unit tests and opt-in synthetic real-tool tests from TEST_REPORT.
-   No production FASTQs are needed. An environment solve failure or smoke-test
+   No production FASTQs are needed. An environment incompatibility or smoke-test
    failure must be resolved before promotion.
 5. Configure the references actually used, actual library chemistry/enzymes,
    intentional dedup groups, resource limits and output/storage roots. Examples

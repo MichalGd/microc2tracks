@@ -1,0 +1,7 @@
+# Administrator-owned /etc/microc2tracks/launcher.conf (root:root, mode 0644).
+# This file is sourced as trusted Bash by the submitting user, never as root.
+# Existing shared environment: no cloning, updating or conda activation needed.
+ENV_PREFIX="/opt/conda/envs/microc2tracks"
+# Optional additional SHARED executable directories, separated by colons.
+# Prefer the environment's bgzip; do not depend on a maintainer's private PATH.
+EXTRA_TOOL_PATH=""
