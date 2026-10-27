@@ -1,5 +1,5 @@
-sample,assay,reference_genome,condition,biological_replicate,technical_replicate,fastq_r1,fastq_r2
-mouse_microC_B1_T1,microc,mouse,basal,1,1,/data/project/mouse_MicroC_B1_T1_R1.fq.gz,/data/project/mouse_MicroC_B1_T1_R2.fq.gz
-mouse_microC_B1_T2,microc,mm39,basal,1,2,/data/project/mouse_MicroC_B1_T2_R1.fq.gz,/data/project/mouse_MicroC_B1_T2_R2.fq.gz
-human_microC_B1_T1,microc,human,control,1,1,/data/project/human_MicroC_B1_T1_R1.fq.gz,/data/project/human_MicroC_B1_T1_R2.fq.gz
-human_hic_B2_T1,hic,hg38,control,2,1,/data/project/human_HiC_B2_T1_R1.fq.gz,/data/project/human_HiC_B2_T1_R2.fq.gz
+sample,assay,reference_genome,condition,biological_replicate,technical_replicate,fastq_r1,fastq_r2,merge_group,hic_protocol,restriction_enzymes,dedup_group
+mouse_microC_B1_T1,microc,mouse,basal,1,1,/data/project/mouse_MicroC_B1_T1_R1.fq.gz,/data/project/mouse_MicroC_B1_T1_R2.fq.gz,,,,
+mouse_microC_B1_T2,microc,mm39,basal,1,2,/data/project/mouse_MicroC_B1_T2_R1.fq.gz,/data/project/mouse_MicroC_B1_T2_R2.fq.gz,,,,
+human_microC_B1_T1,microc,human,control,1,1,/data/project/human_MicroC_B1_T1_R1.fq.gz,/data/project/human_MicroC_B1_T1_R2.fq.gz,,,,
+human_hic_B2_T1,hic,hg38,control,2,1,/data/project/human_HiC_B2_T1_R1.fq.gz,/data/project/human_HiC_B2_T1_R2.fq.gz,,restriction_hic,DpnII,

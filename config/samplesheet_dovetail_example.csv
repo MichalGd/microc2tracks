@@ -1,0 +1,2 @@
+sample,assay,reference_genome,condition,biological_replicate,technical_replicate,fastq_r1,fastq_r2,merge_group,hic_protocol,restriction_enzymes,dedup_group
+kit_library_A,hic,my_reference,control,1,1,/data/kit_library_A_R1.fastq.gz,/data/kit_library_A_R2.fastq.gz,,dovetail_hic,DpnII,

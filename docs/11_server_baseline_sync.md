@@ -1,5 +1,8 @@
 # Installed-server source synchronization
 
+Historical note: the fingerprints below identify commit `8abf4cd`, before the
+3.0 integration changes. They are not checksums of the newer candidate source.
+
 Date: 2026-10-27
 
 This small maintenance update synchronizes the public workflow source with the

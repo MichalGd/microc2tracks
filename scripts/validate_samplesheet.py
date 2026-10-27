@@ -33,10 +33,13 @@ NORMALIZED_COLUMNS = [
     "fastq_r1",
     "fastq_r2",
     "merge_group",
+    "hic_protocol",
+    "restriction_enzymes",
+    "dedup_group",
 ]
 VALID_ASSAYS = {"microc", "hic"}
 GZIP_SUFFIXES = {".gz", ".gzip"}
-SAFE_MERGE_GROUP = re.compile(r"^[A-Za-z0-9_.-]+$")
+SAFE_MERGE_GROUP = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 SAFE_SAMPLE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 
 
@@ -87,6 +90,8 @@ def validate_sheet(
         if reader.fieldnames is None:
             raise RegistryError("sample sheet is empty")
         reader.fieldnames = [column.strip().lstrip("\ufeff") for column in reader.fieldnames]
+        if len(set(reader.fieldnames)) != len(reader.fieldnames):
+            raise RegistryError("sample sheet has duplicate column names")
         missing = [column for column in REQUIRED_COLUMNS if column not in reader.fieldnames]
         if missing:
             raise RegistryError(f"missing required column(s): {', '.join(missing)}")
@@ -102,6 +107,8 @@ def validate_sheet(
         explicit_merge_specs: dict[str, tuple[str, str, str, str]] = {}
 
         for line_number, row in enumerate(reader, start=2):
+            if None in row:
+                errors.append(f"line {line_number}: more fields than declared CSV columns")
             sample = (row.get("sample") or "").strip()
             assay = (row.get("assay") or "").strip().lower()
             condition = (row.get("condition") or "").strip()
@@ -110,6 +117,13 @@ def validate_sheet(
             r1 = (row.get("fastq_r1") or "").strip()
             r2 = (row.get("fastq_r2") or "").strip()
             merge_group = (row.get("merge_group") or "").strip()
+            hic_protocol = (row.get("hic_protocol") or "").strip().lower()
+            restriction_enzymes = (row.get("restriction_enzymes") or "").strip()
+            dedup_group = (row.get("dedup_group") or "").strip()
+            if hic_protocol and hic_protocol not in {"legacy", "restriction_hic", "dovetail_hic"}:
+                errors.append(f"line {line_number}: unsupported hic_protocol {hic_protocol!r}")
+            if assay == "microc" and (hic_protocol or restriction_enzymes):
+                errors.append(f"line {line_number}: Micro-C rows must leave Hi-C-specific columns empty")
             requested_reference = (row.get("reference_genome") or "").strip()
             if not requested_reference:
                 requested_reference = default_id
@@ -133,6 +147,10 @@ def validate_sheet(
                 errors.append(f"line {line_number}: duplicate sample {sample!r}")
             else:
                 seen_samples.add(sample)
+            if sample in {"merged", "dedup_groups", "run_metadata", "final_report", "tmp", "reference_cache"}:
+                errors.append(f"line {line_number}: sample {sample!r} uses a reserved output namespace")
+            if dedup_group and not SAFE_MERGE_GROUP.fullmatch(dedup_group):
+                errors.append(f"line {line_number}: unsafe dedup_group {dedup_group!r}")
             if assay not in VALID_ASSAYS:
                 errors.append(f"line {line_number}: assay must be one of {sorted(VALID_ASSAYS)}")
             if not condition:
@@ -229,6 +247,9 @@ def validate_sheet(
                     "fastq_r1": r1,
                     "fastq_r2": r2,
                     "merge_group": merge_group,
+                    "hic_protocol": hic_protocol,
+                    "restriction_enzymes": restriction_enzymes,
+                    "dedup_group": dedup_group,
                 }
             )
 

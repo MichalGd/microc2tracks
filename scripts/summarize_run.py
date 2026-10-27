@@ -401,13 +401,20 @@ def write_html(path: Path, sample_rows: list[dict[str, str]], merge_rows: list[d
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Summarize a completed microc2tracks run.")
-    parser.add_argument("-c", "--config", required=True, type=Path)
-    parser.add_argument("-s", "--samplesheet", required=True, type=Path)
+    parser.add_argument("-c", "--config", type=Path)
+    parser.add_argument("-s", "--samplesheet", type=Path)
     parser.add_argument("-o", "--outdir", required=True, type=Path)
-    parser.add_argument("--sample-manifest", required=True, type=Path)
-    parser.add_argument("--technical-manifest", required=True, type=Path)
-    parser.add_argument("--merge-manifest", required=True, type=Path)
+    parser.add_argument("--sample-manifest", type=Path)
+    parser.add_argument("--technical-manifest", type=Path)
+    parser.add_argument("--merge-manifest", type=Path)
+    parser.add_argument("--run-plan", type=Path, help="Resolved run_metadata/run_plan.json; supports split disks")
     args = parser.parse_args()
+
+    if args.run_plan:
+        write_plan_summary(json.loads(args.run_plan.read_text()), args.outdir)
+        return
+    if not all((args.config, args.samplesheet, args.sample_manifest, args.technical_manifest, args.merge_manifest)):
+        parser.error("Provide --run-plan, or all legacy config/samplesheet/manifest arguments")
 
     config = parse_config(args.config)
     run_outdir = Path(config.get("OUTDIR", "results"))
@@ -433,6 +440,51 @@ def main() -> None:
     write_html(args.outdir / "microc2tracks_summary.html", sample_rows, merge_rows, file_rows)
 
     print(f"Wrote final report to {args.outdir}")
+
+
+def write_plan_summary(plan: dict, outdir: Path) -> None:
+    """New runs use only declared physical paths; legacy report APIs stay available."""
+    import shutil
+    outdir.mkdir(parents=True, exist_ok=True)
+    sample_rows, group_rows, file_rows, qc_rows = [], [], [], []
+    for key, entity in plan["entities"].items():
+        if entity["kind"] in {"external", "external_sorted"}:
+            continue
+        paths = entity["paths"]
+        status = parse_status(Path(paths["status"]))
+        qc_path = Path(paths["filter_qc"])
+        qc = json.loads(qc_path.read_text()) if qc_path.exists() else {}
+        dedup = parse_pairtools_stats(Path(paths["dedup_stats"]))
+        policy = entity["policy"]
+        row = {"entity": key, "kind": entity["kind"], "sample": entity["name"], "reference_id": entity["reference_id"],
+               "assay": policy["assay"], "profile": policy["profile"], "restriction_enzymes": "+".join(policy["enzymes"]),
+               "min_cis_dist": str(policy["min_cis_dist"]), "members": ",".join(entity["members"]),
+               "filtering_provenance": qc.get("limited_provenance", "stage-verified"),
+               "dedup_units": ",".join(entity["units"]), "status": status.get("status", "not_started"),
+               "dedup_total": dedup.get("total", ""), "dedup_total_nodups": dedup.get("total_nodups", ""),
+               "dedup_total_dups": dedup.get("total_dups", ""), "valid_pairs_total": as_text(qc.get("exclusive_counts", {}).get("accepted")),
+               "valid_pairs_cis": as_text(qc.get("accepted_cis")), "valid_pairs_trans": as_text(qc.get("accepted_trans")),
+               "valid_pairs_path": paths["accepted"], "norm_mcool_path": paths["norm_mcool"], "norm_hic_path": paths["norm_hic"]}
+        (sample_rows if entity["kind"] == "sample" else group_rows).append(row)
+        for category, count in qc.get("exclusive_counts", {}).items():
+            qc_rows.append({"entity": key, "count_type": "exclusive", "category": category, "count": str(count)})
+        for category, count in qc.get("diagnostic_flags", {}).items():
+            qc_rows.append({"entity": key, "count_type": "overlapping_diagnostic", "category": category, "count": str(count)})
+        for label, value in paths.items():
+            path = Path(value)
+            if path.is_file():
+                file_rows.append({"entity": key, "category": label, "path": value, "size_bytes": str(path.stat().st_size)})
+    write_tsv(outdir / "microc2tracks_sample_summary.tsv", sample_rows)
+    write_tsv(outdir / "microc2tracks_merge_summary.tsv", group_rows)
+    write_tsv(outdir / "microc2tracks_filter_counts.tsv", qc_rows)
+    write_tsv(outdir / "microc2tracks_file_manifest.tsv", file_rows)
+    write_html(outdir / "microc2tracks_summary.html", sample_rows, group_rows, file_rows)
+    report = outdir / "microc2tracks_summary.html"
+    report.write_text(report.read_text(encoding="utf-8").replace("Merged Technical Replicates", "Joint deduplication units and pooled outputs").replace(
+        "<h1>microc2tracks final report</h1>", "<h1>microc2tracks final report</h1><p>Individual sample counts are independent and need not sum to jointly deduplicated group totals. Fragment/orientation categories are artifact candidates, not proven molecular origins. Distance 0 means disabled.</p>"), encoding="utf-8")
+    from workflow_common import json_write
+    json_write(outdir / "storage_usage.json", {key: {"path": value, "free_bytes": shutil.disk_usage(value).free}
+               for key, value in plan["roots"].items() if Path(value).exists()})
 
 
 if __name__ == "__main__":

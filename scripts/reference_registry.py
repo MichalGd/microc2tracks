@@ -168,6 +168,8 @@ def read_sizes(path: Path, label: str) -> dict[str, int]:
                 length = int(fields[1])
             except ValueError as exc:
                 raise RegistryError(f"{label} line {line_number} has invalid length {fields[1]!r}") from exc
+            if length <= 0 or not name or any(c.isspace() for c in name):
+                raise RegistryError(f"{label} line {line_number}: chromosome names must be nonempty tokens and lengths positive")
             if name in result:
                 raise RegistryError(f"{label} contains duplicate chromosome {name!r}")
             result[name] = length
@@ -219,7 +221,7 @@ def validate_reference_files(ref: Reference) -> list[str]:
                     f"retained {','.join(canonical) or 'none'}"
                 )
             mito_variants = [name for name in chrom_values if name in {"chrM", "MT", "chrMT"}]
-            if mito_variants != ["chrM"]:
+            if ref.reference_id in EXPECTED_CANONICAL and mito_variants != ["chrM"]:
                 errors.append(
                     f"{ref.reference_id} must use chrM deliberately for UCSC-compatible matrices; "
                     f"found mitochondrial names {mito_variants or 'none'}"

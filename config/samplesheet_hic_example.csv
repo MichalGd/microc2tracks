@@ -1,0 +1,4 @@
+sample,assay,reference_genome,condition,biological_replicate,technical_replicate,fastq_r1,fastq_r2,merge_group,hic_protocol,restriction_enzymes,dedup_group
+libraryA_part1,hic,my_reference,control,1,1,/data/libraryA_part1_R1.fastq.gz,/data/libraryA_part1_R2.fastq.gz,control_A,restriction_hic,NlaIII,libraryA_joint
+libraryA_part2,hic,my_reference,control,1,2,/data/libraryA_part2_R1.fastq.gz,/data/libraryA_part2_R2.fastq.gz,control_A,restriction_hic,NlaIII,libraryA_joint
+libraryB,hic,my_reference,control,2,1,/data/libraryB_R1.fastq.gz,/data/libraryB_R2.fastq.gz,,restriction_hic,NlaIII,

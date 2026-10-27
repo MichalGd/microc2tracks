@@ -4,20 +4,21 @@ channels:
   - bioconda
 dependencies:
   - python=3.11
-  - fastp
-  - bwa-mem2
-  - samtools
-  - htslib
-  - pairtools
-  - pairix
-  - cooler
-  - cooltools
-  - bioframe
+  - fastp=0.24.0
+  - bwa-mem2=2.2.1
+  - samtools=1.21
+  - htslib=1.21
+  - pairtools=1.1.3
+  - pairix=0.3.9
+  - cooler=0.10.4
+  - cooltools=0.7.1
+  - bioframe=0.7.2
   - multiqc
-  - openjdk
-  - pandas
-  - numpy
-  - scipy
+  - openjdk=17
+  - pandas=2.2.3
+  - numpy=1.26.4
+  - scipy=1.14.1
+  - h5py=3.12.1
   - matplotlib
   - pyyaml
   - pip

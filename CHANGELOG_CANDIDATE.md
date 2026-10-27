@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased - 3.0.0-rc1 (2026-10-27)
+
+One complete integration candidate; not yet promoted to production.
+
+- Kept Hi-C and Micro-C behind the same existing shell commands, using shared
+  planning, pairs, matrix and artifact-state helpers.
+- Added explicit restriction profiles, DpnII/MboI/NlaIII/HindIII digests and
+  combinations, optional original-kit Dovetail preset, fragment artifact
+  classification and consistent assay-specific distance filtering.
+- Added optional `dedup_group` metadata and a single joint pass over original
+  sorted streams, while preserving independent sample products. No UMIs.
+- Added technical/all-sample pools of disjoint units and overlap/partial-group
+  rejection, plus explicit standalone pool/joint-dedup/legacy-pool modes.
+- Added optional output roots, isolated SSD scratch, HDD destination staging,
+  verified cross-filesystem publication, reserves/mount checks and owned cleanup.
+- Added parameter/input/tool fingerprints, stage-specific restarts, safe managed
+  relocation without recomputation, explicit failure states and live tool logs.
+- Added plan-aware summaries/browser packaging and custom-reference support
+  without mandatory human/mouse chromosome names.
+- Added generic examples, target environment pins, small regressions and tiny
+  opt-in real-tool tests. Linux real-tool tests and an environment solve remain
+  release gates; local mocked contracts do not establish scientific-tool success.
+- Preserved the earlier LF and missing-HTML-value fixes and fastp guard. Historical
+  `SERVER_BASELINE_SHA256SUMS.txt` describes the pre-integration server source,
+  not this candidate's changed files.
+
+See [the integration guide](docs/12_integrated_hic_and_storage.md) and
+[verification results](TEST_REPORT.md).
+
 ## 2026-10-27 - Installed-server source synchronization
 
 Source update: [`8abf4cd`](https://github.com/MichalGd/microc2tracks/commit/8abf4cd06e27d6d7b609ff318d30e79bff2f041d).

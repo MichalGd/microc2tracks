@@ -62,18 +62,12 @@ For the default reference only, old `GENOME_ASSEMBLY`, `REFERENCE_FASTA`,
 existing mouse server config continue to use its installed files. New references
 must be configured in the registry.
 
-Existing output directory and file names are retained. New manifests/status
-files add reference columns. Completion sentinels now contain `reference_id` and
-`assembly`. A sentinel from another reference is rejected and the step rebuilds.
-Legacy outputs without sentinels may be adopted only for `mm39` when both
-`BOOTSTRAP_SENTINELS=true` and `ALLOW_LEGACY_MM39_RESUME=true`; this is the
-documented migration bridge. Human outputs are never adopted without matching
-reference metadata.
-
-When a sample's reference changes, use a new `OUTDIR` if possible. Otherwise
-remove that sample's output directory (and its corresponding merged group) after
-archiving it. Do not copy old `.done`, pairs, matrices, or downstream outputs
-into the new reference run.
+Existing output names remain, with optional alternative physical roots. Enhanced
+stage records contain reference/input/policy/tool signatures and do not adopt
+legacy `.done` records. Use a new OUTDIR for migration or reference changes;
+preserve the original outputs. Custom registry entries are supported, including
+non-mammalian/non-`chr` contigs; only the named mm39/hg38 presets enforce their
+specific browser naming rules. See [the integration guide](12_integrated_hic_and_storage.md).
 
 ## Chromosome Policy
 

@@ -26,3 +26,5 @@ flowchart TD
 | `08_light_downstream_analysis.md` | Default light downstream analysis, TAD calls, compartments, outputs, and interpretation. |
 | `09_multi_reference.md` | mm39/hg38 registry, sample sheets, chromosome policy, migration, preflight, and resumability. |
 | `10_browser_tracks.md` | Assembly-explicit UCSC/HiGlass packaging and chromosome-name behavior. |
+| `11_server_baseline_sync.md` | Historical source-identical server synchronization before the integration update. |
+| `12_integrated_hic_and_storage.md` | Integrated restriction Hi-C, joint deduplication, pooling, optional disks, restart and minimum tests. |

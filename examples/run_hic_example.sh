@@ -3,9 +3,8 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# Use assay=hic in the sample sheet. The first version uses the shared
-# pairs-to-matrix path; add restriction-fragment filtering once enzyme metadata
-# and fragment BED files are available.
+# Generic restriction Hi-C. Declare the actual enzyme in the CSV/config; do not
+# infer it from the assembly. my_reference in the example must be registered.
 bash "${REPO_DIR}/scripts/microc2tracks.sh" \
-  -c "${REPO_DIR}/config/config.conf" \
-  -s "${REPO_DIR}/config/samplesheet.csv"
+  -c "${1:-${REPO_DIR}/config/config.conf}" \
+  -s "${2:-${REPO_DIR}/config/samplesheet_hic_example.csv}"

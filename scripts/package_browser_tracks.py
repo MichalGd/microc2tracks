@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import csv
 import gzip
+import json
 import math
 import re
 import shlex
@@ -22,6 +23,7 @@ HUMAN_CANONICAL = [f"chr{i}" for i in range(1, 23)] + ["chrX", "chrY", "chrM"]
 class SampleSpec:
     label: str
     merged_dir: Path
+    chrom_sizes: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -78,7 +80,7 @@ def parse_int(value: str) -> int | None:
 
 def canonical_chroms(preset: str, custom: str) -> list[str]:
     if custom.strip():
-        return [normalize_ucsc_chrom(item.strip()) for item in custom.split(",") if item.strip()]
+        return [(normalize_ucsc_chrom(item.strip()) if preset in {"mouse", "human"} else item.strip()) for item in custom.split(",") if item.strip()]
     if preset == "mouse":
         return MOUSE_CANONICAL
     if preset == "human":
@@ -164,7 +166,9 @@ def read_track_rows(
         if missing:
             fail(f"{path} missing required column(s): {', '.join(sorted(missing))}")
         for record in reader:
-            chrom = normalize_ucsc_chrom(record["chrom"])
+            chrom = record["chrom"].strip()
+            if chrom not in canonical:
+                chrom = normalize_ucsc_chrom(chrom)
             if chrom not in canonical:
                 continue
             start = parse_int(record["start"])
@@ -205,6 +209,8 @@ def write_bedgraph_gz(
 
 
 def chrom_sizes_candidates(sample: SampleSpec) -> list[Path]:
+    if sample.chrom_sizes:
+        return [sample.chrom_sizes]
     return [
         *sample.merged_dir.glob("03_pairs/*.chrom.sizes"),
         *sample.merged_dir.glob("03_pairs/*.matrix.chrom.sizes"),
@@ -227,7 +233,7 @@ def read_chrom_sizes(samples: list[SampleSpec], canonical: set[str]) -> dict[str
                         fields = line.split()
                     if len(fields) < 2:
                         continue
-                    chrom = normalize_ucsc_chrom(fields[0])
+                    chrom = fields[0] if fields[0] in canonical else normalize_ucsc_chrom(fields[0])
                     size = parse_int(fields[1])
                     if chrom in canonical and size is not None:
                         sizes[chrom] = max(size, sizes.get(chrom, 0))
@@ -335,10 +341,12 @@ def main() -> None:
     parser.add_argument(
         "--sample",
         action="append",
-        required=True,
+        default=[],
         help="LABEL=/path/to/merged_dir; repeat for each merged matrix",
     )
     parser.add_argument("--out-dir", required=True, help="output package directory")
+    parser.add_argument("--run-plan", type=Path, help="Resolved run_metadata/run_plan.json; uses declared paths")
+    parser.add_argument("--entity", action="append", default=[], help="Entity key in --run-plan, e.g. pool:controls; repeat")
     parser.add_argument("--tad-resolution", default="10000", help="insulation table resolution")
     parser.add_argument("--insulation-window", default="100000", help="insulation score window column")
     parser.add_argument("--compartment-resolution", default="100000", help="compartment eigenvector resolution")
@@ -351,11 +359,10 @@ def main() -> None:
     )
     parser.add_argument(
         "--reference-id",
-        choices=["mm39", "hg38"],
-        required=True,
+        default="",
         help="assembly identity; prevents human tracks from silently using the mouse preset",
     )
-    parser.add_argument("--canonical-preset", choices=["mouse", "human"], default="")
+    parser.add_argument("--canonical-preset", choices=["mouse", "human", "custom"], default="")
     parser.add_argument(
         "--canonical-chroms",
         default="",
@@ -364,17 +371,39 @@ def main() -> None:
     parser.add_argument("--color", default="64,64,64", help="UCSC track color, default dark gray")
     args = parser.parse_args()
 
-    samples = [parse_sample(value) for value in args.sample]
+    plan_reference = None
+    if args.run_plan:
+        plan = json.loads(args.run_plan.read_text())
+        selected = [plan["entities"][key] for key in args.entity] if args.entity else [e for e in plan["entities"].values() if e["kind"] == "pool"]
+        if not selected:
+            selected = [e for e in plan["entities"].values() if e["kind"] == "sample"]
+        reference_ids = {e["reference_id"] for e in selected}
+        if len(reference_ids) != 1:
+            fail("Choose entities from exactly one reference for a browser package")
+        reference_id = next(iter(reference_ids))
+        if args.reference_id and args.reference_id != reference_id:
+            fail("--reference-id contradicts the selected run-plan entities")
+        args.reference_id = reference_id
+        plan_reference = plan["references"][reference_id]
+        samples = [SampleSpec(e["name"], Path(e["paths"]["entity_dir"]), Path(e["paths"]["chrom_sizes"])) for e in selected]
+    else:
+        samples = [parse_sample(value) for value in args.sample]
+    if not samples or not args.reference_id:
+        fail("Provide --run-plan or both --sample and --reference-id")
     if len({sample.label for sample in samples}) != len(samples):
         fail("Sample labels must be unique")
 
-    expected_preset = {"mm39": "mouse", "hg38": "human"}[args.reference_id]
+    expected_preset = ({"mm39": "mouse", "hg38": "human"}.get(args.reference_id, "custom") if not plan_reference
+                       else plan_reference["browser_preset"] if plan_reference["browser_preset"] in {"mouse", "human", "custom"} else "custom")
     if args.canonical_preset and args.canonical_preset != expected_preset:
         fail(
             f"--reference-id {args.reference_id} requires canonical preset {expected_preset}, "
             f"not {args.canonical_preset}"
         )
     canonical_preset = args.canonical_preset or expected_preset
+    if canonical_preset == "custom" and not args.canonical_chroms and plan_reference:
+        with samples[0].chrom_sizes.open() as handle:
+            args.canonical_chroms = ",".join(line.split()[0] for line in handle if line.strip())
     canonical_order = canonical_chroms(canonical_preset, args.canonical_chroms)
     canonical = set(canonical_order)
     chrom_order = {chrom: index for index, chrom in enumerate(canonical_order)}

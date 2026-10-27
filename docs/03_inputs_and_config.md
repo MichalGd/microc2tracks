@@ -149,18 +149,12 @@ HIC_NORMALIZATIONS="VC,VC_SQRT,KR,SCALE"
 For exploratory runs, fewer `.hic` normalizations or coarser `HIC_RESOLUTIONS`
 can save substantial time.
 
-The runner writes per-step sentinel files under each `logs/done/` directory.
-Sentinels record canonical reference identity. A mismatched or legacy human
-sentinel is never reused. Missing sentinels can be bootstrapped only for legacy
-mm39 outputs by default:
-
-```bash
-BOOTSTRAP_SENTINELS="true"
-ALLOW_LEGACY_MM39_RESUME="true"
-```
-
-Changing reference invalidates reuse. Prefer a new output directory; otherwise
-archive and remove the affected sample and merged-group outputs before rerunning.
+The integrated runner writes stage records under `logs/done/*.json`, including
+input/policy/tool signatures and physical artifact identities. Legacy `.done`
+records are not adopted, regardless of old bootstrap switches. Use a new OUTDIR
+for migration/reference changes; preserve the original sample outputs.
+See [the integration guide](12_integrated_hic_and_storage.md) for new metadata,
+optional disks, deduplication scope and restart rules.
 
 Light preliminary downstream analysis is enabled by default:
 
@@ -272,4 +266,7 @@ fastp -> bwa-mem2 -> pairtools -> cooler -> Juicer Tools
 
 For Micro-C, the valid-pair filter also removes cis contacts closer than `MICROC_MIN_CIS_DIST`.
 
-For Hi-C, the first version uses the shared path and `HIC_MIN_CIS_DIST`. A future restriction-fragment module should add enzyme-specific fragment annotation and filtering when reliable restriction enzyme metadata are available.
+Hi-C remains in the shared workflow. Restriction profiles now resolve explicit
+enzymes, build a reference digest and classify/filter fragments; legacy Hi-C
+remains available with a warning. `HIC_MIN_CIS_DIST=0` disables distance filtering,
+not restriction filtering. See [the integrated Hi-C guide](12_integrated_hic_and_storage.md).

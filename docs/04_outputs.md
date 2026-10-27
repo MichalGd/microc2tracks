@@ -79,16 +79,18 @@ Keep `.valid.mapq30.pairs.gz` files because they are the most reusable intermedi
 
 Trimmed FASTQ, temporary Juicer pair files, raw `.hic`, raw `.mcool`, and single-resolution `.cool` files are reproducible from retained upstream files. Their retention is controlled in `config.conf`.
 
-`logs/done/*.done` files are resumability sentinels. They record successful
-step completion, canonical `reference_id`, and assembly after outputs exist. A
-different or missing reference does not resume. As a backward-compatibility
-exception, complete legacy mm39 outputs without sentinels can be adopted when
-`BOOTSTRAP_SENTINELS=true` and `ALLOW_LEGACY_MM39_RESUME=true`.
+The tree above illustrates the original single-root layout. Integrated runs also
+retain original `.sorted.pairs.gz`, filter-QC/provenance sidecars, and optional
+`dedup_groups/<id>` products. `logs/done/*.json` records scientific signatures,
+artifact identities and success/failure; legacy `.done` files do not certify new
+processing. Optional disk roots keep the same relative layout. The authoritative
+physical paths are in `run_metadata/run_plan.json` and `artifacts.tsv`.
+See [the integration/storage guide](12_integrated_hic_and_storage.md).
 
 `run_metadata/sample_manifest.tsv`, `technical_replicates.tsv`, and
 `merge_manifest.tsv` record reference identity, assembly/browser metadata, and
-merge membership. Each sample or merged group also has `logs/*.reference.tsv`;
-final sample and merge summaries carry the same reference fields.
+merge membership. Resolved reference metadata is included in the JSON plan and
+per-artifact provenance; final sample and merge summaries carry reference fields.
 
 By default, `RUN_PRELIM_DOWNSTREAM=true`, so light downstream outputs are written
 under `05_downstream/` for each technical replicate and for each merged

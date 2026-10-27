@@ -1,1 +1,1 @@
-sample,assay,reference_genome,condition,biological_replicate,technical_replicate,fastq_r1,fastq_r2
+sample,assay,reference_genome,condition,biological_replicate,technical_replicate,fastq_r1,fastq_r2,merge_group,hic_protocol,restriction_enzymes,dedup_group

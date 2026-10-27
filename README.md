@@ -4,26 +4,34 @@
 
 The first implementation follows the style of the existing Shell repositories `fastq2tracks` and `rnaseq2tracksP`: a top-level runner, `config/`, `docs/`, `examples/`, `scripts/`, `environment.yml`, and simple tests.
 
-The [2026-10-27 installed-server source synchronization](docs/11_server_baseline_sync.md)
-includes the verified production fastp concurrency guard and fixes for normalized
-TSV line endings and missing HTML report values. It does not implement the
-planned restriction-aware Hi-C or cross-input deduplication features.
+Version **3.0.0-rc1** implements integrated restriction Hi-C, user-selected joint
+deduplication, disjoint pooling and optional output disks. Read the
+[integration/storage guide](docs/12_integrated_hic_and_storage.md) before upgrading.
+It preserves the [earlier server fixes](docs/11_server_baseline_sync.md).
+This candidate still requires the tiny real-tool Linux smoke tests before
+production promotion; see [the test report](TEST_REPORT.md).
 
 ## Workflow Schematic
 
 ```mermaid
 flowchart LR
-  R["Validated reference registry<br/>mm39 or hg38"] --> A
+  R["Validated reference registry<br/>including custom assemblies"] --> A
   A["Sample sheet<br/>paired FASTQ + reference_genome"] --> B["fastp<br/>QC + trimming"]
   B --> C["bwa-mem2<br/>Hi-C/Micro-C alignment"]
-  C --> D["pairtools parse/sort/dedup<br/>deduplicated pairs"]
-  D --> E{"Assay profile"}
+  C --> D["pairtools parse/sort<br/>retained original sorted pairs"]
+  D --> Q["Independent per-row dedup"]
+  Q --> E{"Assay profile"}
   E -->|"Micro-C"| F["MAPQ filter<br/>near-diagonal cis filter"]
-  E -->|"Hi-C"| G["MAPQ filter<br/>restriction-aware module planned"]
+  E -->|"Hi-C"| G["MAPQ + optional cis filter<br/>profile-specific restriction classification"]
   F --> H["indexed valid .pairs.gz"]
   G --> H
   H --> I["per-row matrices<br/>.cool + .mcool + .hic"]
-  H --> N["technical replicate merge<br/>same assay + condition + biological replicate + reference"]
+  D --> U["User-selected dedup_group<br/>merge originals, dedup once"]
+  U --> V["Same shared assay filtering"]
+  V --> W["Accepted joint-unit pairs"]
+  H --> T["Select disjoint units once<br/>joint unit replaces its rows"]
+  W --> T
+  T --> N["Technical / optional all-sample pool<br/>no extra global dedup"]
   N --> O["merged matrices<br/>.cool + .mcool + .hic"]
   I --> K["cooltools / Mustache / Chromosight<br/>TADs, compartments, loops, stripes"]
   O --> K
@@ -69,15 +77,18 @@ Optional heavier downstream scripts can generate:
 | Area | Current functionality | Main outputs | Status |
 |---|---|---|---|
 | Input hygiene | Checks and normalizes config/sample-sheet text artifacts before parsing | Unix line endings, cleaned CSV fields | implemented |
-| Per-sample references | Controlled aliases resolve through one registry to mm39 or hg38 paths/policies | assembly-correct alignment, matrices, tracks, manifests | implemented |
-| Resumability | Reference-bound per-step sentinels plus atomic temp outputs for major files | `logs/done/*.done`, safer restarts | implemented |
+| Per-sample references | Validated registry, including custom references and contig names | assembly-correct alignment, matrices, tracks, manifests | implemented |
+| Resumability | Parameter/input/tool fingerprints, owned artifacts and verified publication | `logs/done/*.json`, safer restarts | implemented |
 | Parallel samples | Optional sample-level parallelism with matrix and `.hic` semaphores | 1-4 concurrent sample workers, conservative defaults | implemented |
 | FASTQ QC and trimming | Paired-end adapter detection and trimming | `fastp.html`, `fastp.json`, trimmed FASTQ | implemented |
 | Alignment | Hi-C/Micro-C style chimeric-read alignment with `bwa-mem2 mem -SP5M` | streamed SAM into pairtools | implemented |
 | Contact parsing | Parse, sort, deduplicate, and index contact pairs | `.dedup.pairs.gz`, `.valid.mapq*.pairs.gz`, `.px2` | implemented |
 | Micro-C filtering | MAPQ filtering plus configurable short cis-distance filter | Micro-C-ready valid pairs | implemented |
 | Canonical chromosomes | Optional canonical chromosome filter before `.cool`, `.mcool`, and `.hic` generation | UCSC-friendlier matrices and `.hic` files | enabled by default |
-| Hi-C support | Shared FASTQ-to-pairs-to-matrices path | Hi-C `.pairs.gz`, `.mcool`, `.hic` | implemented; restriction-fragment filtering planned |
+| Hi-C support | Shared workflow with explicit protocol, digest and artifact policy | annotated accepted pairs, QC, `.mcool`, `.hic` | implemented in candidate |
+| Joint deduplication | User-selected dedup_group, original sorted streams, one joint pass | independent row outputs and joint-unit pairs/QC | implemented in candidate |
+| Biological pooling | Optional all-sample aggregate of disjoint units, without global dedup | explicitly named pooled matrices | implemented in candidate |
+| Multi-disk storage | Optional pairs/matrix/trim/cache roots; SSD scratch; HDD final output | resolved paths and verified transfers | implemented in candidate |
 | Matrix generation | Raw and balanced single-resolution and multiresolution matrices | `.cool`, `.mcool` | implemented |
 | `.hic` export | Juicer-compatible `.hic` generation and normalization | `.raw.hic`, `.norm.hic` | implemented |
 | Technical replicate merging | Merge filtered pair files within assay/condition/biological replicate groups and rebuild matrices | merged `.pairs.gz`, `.mcool`, `.hic` | implemented |
@@ -116,14 +127,14 @@ Optional heavier downstream scripts can generate:
 Use one unified workflow with assay-specific configuration:
 
 - Micro-C: no restriction fragment logic, default near-diagonal cis filter of 1000 bp.
-- Hi-C: shared alignment, pairs, matrix, and downstream path; restriction-enzyme-aware filtering can be added as a focused module when enzyme metadata are available.
+- Hi-C: the shared path supports DpnII, MboI, NlaIII and HindIII digests, restriction-fragment classification and an independent optional distance cutoff. Legacy mode remains explicit.
 - Both assays produce `.pairs.gz`, `.mcool`, and `.hic`, which makes downstream comparison consistent.
 - By default, matrices and `.hic` files are filtered to canonical chromosomes with `FILTER_CANONICAL_CHROMS=true`; for UCSC tracks, the retained chromosome names must also match the UCSC assembly, e.g. `chr1`, `chr2`, `chrX`.
 
 ## Reference Selection
 
-Each new sample-sheet row should set `reference_genome` to `mouse`, `mm39`,
-`human`, or `hg38`. Aliases normalize to canonical `mm39`/`hg38`, and one TSV
+Each new sample-sheet row selects a registered reference. The supplied examples
+include `mouse`/`mm39` and `human`/`hg38`; custom entries are supported. One TSV
 registry supplies the corresponding FASTA, BWA-MEM2 index, chromosome sizes,
 canonical regex, browser preset, and optional metadata. Unknown values fail.
 
@@ -147,8 +158,9 @@ cp config/samplesheet_template.csv config/samplesheet.csv
 # Edit config/config.conf and config/samplesheet.csv first.
 # Required sample-sheet columns:
 # sample,assay,reference_genome,condition,biological_replicate,technical_replicate,fastq_r1,fastq_r2
-# Edit config/references.tsv so mm39/hg38 paths match the server.
-# Production defaults are THREADS_FASTP=8 and MAX_PARALLEL_SAMPLES=2.
+# Edit config/references.tsv for the exact references used by this run.
+# Hi-C restriction rows require actual enzyme metadata; examples are not inference.
+# Resource values are configurable examples; do not assume a particular server.
 bash scripts/preflight_check.sh -c config/config.conf -s config/samplesheet.csv
 bash scripts/microc2tracks.sh -c config/config.conf -s config/samplesheet.csv
 ```
@@ -227,9 +239,12 @@ python scripts/compare_matrices.py \
 - `config/config_template.conf`: server, legacy-default-reference, tool, and resource defaults
 - `config/references.tsv`: centralized mm39/hg38 registry with controlled aliases and browser/chromosome policy
 - `config/samplesheet_template.csv`: per-row reference plus biological and technical replicate metadata
-- `scripts/sanitize_text_inputs.py`: automatic line-ending/BOM/CSV-field cleanup used by preflight and the main runner
+- `scripts/sanitize_text_inputs.py`: optional explicit in-place cleanup utility; the integrated runner reads configs without rewriting their originals
 - `scripts/microc2tracks.sh`: FASTQ to pairs, `.cool`, `.mcool`, and `.hic`
 - `scripts/merge_replicates.sh`: merge filtered pairs and rebuild matrices
+- `scripts/run_plan.py`: resolved profiles, dedup units, pools and physical paths
+- `scripts/filter_contact_pairs.py`: shared quality, distance and restriction filtering
+- `scripts/artifact_state.py`: fingerprinted stages, safe publication and owned cleanup
 - `scripts/run_downstream.sh`: common downstream analyses from `.mcool`
 - `scripts/call_tads_from_insulation.py`: TAD-like BED intervals from cooltools insulation boundaries
 - `scripts/export_insulation_bedgraph.py`: browser-ready insulation score bedGraph tracks
@@ -244,8 +259,12 @@ python scripts/compare_matrices.py \
 
 ## Server Fit
 
-The defaults target a shared CPU-heavy server with 500 GB RAM, 70 physical CPU cores, 140 logical CPUs, and no/limited GPU. GPU-dependent tools such as HiCCUPS are not required for the default path.
+The template provides conservative example resources; adjust threads, memory,
+concurrency and storage reserves to the actual machine. GPU tools are not required.
 
 ## Status
 
-This is a first usable script-based workflow. The most important next extension is a stricter Hi-C restriction-fragment module when enzyme metadata and fragment BED files are available.
+The complete agreed feature set is implemented in one release candidate. Local
+scientific/unit and orchestration-contract checks are distinct from the opt-in
+real-tool tests. Do not deploy the candidate over an active installation or use
+old reference-only completion markers to certify enhanced outputs.

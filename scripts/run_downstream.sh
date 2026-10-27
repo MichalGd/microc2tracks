@@ -33,6 +33,7 @@ SAMPLE=""
 MATRIX=""
 OUTPUT_BASE=""
 LIGHT_MODE="false"
+DOWNSTREAM_FAILED=0
 
 while getopts ":c:s:m:o:lh" opt; do
   case "${opt}" in
@@ -80,7 +81,7 @@ printf 'reference_id\t%s\nphasing_track\t%s\n' "${REFERENCE_ID}" "${PHASING_TRAC
   > "${DOWNSTREAM_DIR}/reference.tsv"
 
 if ! command -v cooltools >/dev/null 2>&1; then
-  log_msg "cooltools not found; skipping cooltools downstream analyses"
+  die "cooltools not found; requested downstream analysis cannot be marked successful"
 else
   TAD_URI="${MATRIX}::resolutions/${TAD_RESOLUTION}"
   COMP_URI="${MATRIX}::resolutions/${COMPARTMENT_RESOLUTION}"
@@ -127,7 +128,7 @@ else
       BEDGRAPH_ARGS+=(--track-line)
     fi
     python "${SCRIPT_DIR}/export_insulation_bedgraph.py" "${BEDGRAPH_ARGS[@]}" \
-      > "${LOG_DIR}/${SAMPLE}.insulation_bedgraph.log" 2>&1 || true
+      > "${LOG_DIR}/${SAMPLE}.insulation_bedgraph.log" 2>&1 || DOWNSTREAM_FAILED=1
     if ls "${INSULATION_BEDGRAPH_DIR}/${SAMPLE}.insulation_score."*.bedGraph >/dev/null 2>&1; then
       date '+%Y-%m-%d %H:%M:%S' > "${INSULATION_BEDGRAPH_SENTINEL}"
     fi
@@ -145,7 +146,7 @@ else
       TAD_ARGS+=(--min-boundary-strength "${TAD_MIN_BOUNDARY_STRENGTH}")
     fi
     python "${SCRIPT_DIR}/call_tads_from_insulation.py" "${TAD_ARGS[@]}" \
-      > "${LOG_DIR}/${SAMPLE}.tads.log" 2>&1 || true
+      > "${LOG_DIR}/${SAMPLE}.tads.log" 2>&1 || DOWNSTREAM_FAILED=1
   fi
 
   if [ -n "${PHASING_TRACK:-}" ] && [ -f "${PHASING_TRACK}" ]; then
@@ -155,14 +156,14 @@ else
       -o "${EIGS_PREFIX}" \
       --phasing-track "${PHASING_TRACK}" \
       "${COMP_URI}" \
-      > "${LOG_DIR}/${SAMPLE}.eigs_cis.log" 2>&1 || true
+      > "${LOG_DIR}/${SAMPLE}.eigs_cis.log" 2>&1 || DOWNSTREAM_FAILED=1
   else
     log_msg "${SAMPLE}: cooltools eigs-cis at ${COMPARTMENT_RESOLUTION} without phasing track; PC1 sign is arbitrary"
     cooltools eigs-cis \
       -p "${COOLTOOLS_THREADS}" \
       -o "${EIGS_PREFIX}" \
       "${COMP_URI}" \
-      > "${LOG_DIR}/${SAMPLE}.eigs_cis.log" 2>&1 || true
+      > "${LOG_DIR}/${SAMPLE}.eigs_cis.log" 2>&1 || DOWNSTREAM_FAILED=1
   fi
 
   if bool_true "${LIGHT_MODE:-false}"; then
@@ -183,7 +184,7 @@ else
       -o "${DOTS_OUT}" \
       "${LOOP_URI}" \
       "${EXPECTED_LOOP}" \
-      > "${LOG_DIR}/${SAMPLE}.cooltools_dots.log" 2>&1 || true
+      > "${LOG_DIR}/${SAMPLE}.cooltools_dots.log" 2>&1 || DOWNSTREAM_FAILED=1
   fi
 fi
 
@@ -206,7 +207,7 @@ else
         -r "${LOOP_RESOLUTION}" \
         -p "${COOLTOOLS_THREADS}" \
         -o "${MUSTACHE_OUT}" \
-        > "${LOG_DIR}/${SAMPLE}.mustache.log" 2>&1 || true
+        > "${LOG_DIR}/${SAMPLE}.mustache.log" 2>&1 || DOWNSTREAM_FAILED=1
     fi
   else
     log_msg "mustache not found; skipping Mustache loop calling"
@@ -217,4 +218,5 @@ if ! bool_true "${LIGHT_MODE:-false}" && command -v chromosight >/dev/null 2>&1;
   log_msg "chromosight found; stripe/loop modules can be added here when parameters are finalized"
 fi
 
-log_msg "${SAMPLE}: downstream finished"
+[ "${DOWNSTREAM_FAILED}" -eq 0 ] || die "${SAMPLE}: one or more downstream modules failed; inspect the stage logs"
+log_msg "${SAMPLE}: downstream finished successfully"

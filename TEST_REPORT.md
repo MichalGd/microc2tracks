@@ -1,5 +1,62 @@
 # Test Report
 
+## Integrated update candidate 3.0.0-rc1: 2026-10-27
+
+Baseline: published `main` commit `0ce6761` (the verified installed-server source
+sync and its changelog). All agreed feature areas are implemented in one local
+candidate; no server installation, environment or production outputs were changed.
+
+### Executed checks
+
+- `python -m unittest discover -s tests -p 'test_*.py' -q`: **46 discovered,
+  42 passed, 4 explicitly skipped**; about seven seconds in this workspace.
+- Python compilation of `scripts/` and `tests/`: **passed**.
+- `bash tests/check_bash_syntax.sh`: **passed**.
+- `bash tests/test_reference_sentinel.sh`: **passed** (historical helper regression).
+- Main, merge and preflight shell-entry help routes: **passed**.
+- Browser-package CLI help and example CSV validation: **passed**. Missing
+  example FASTQs warn as expected; examples are not production run instructions.
+- Git whitespace validation: **passed**.
+
+The 42 passing tests include exact enzyme cut maps/offsets and chunk overlaps,
+fragment/orientation classes, chromosome/coordinate checks, disabled/inclusive
+distance behavior, Micro-C legacy-predicate contact equivalence, explicit profiles,
+disjoint/partial dedup units, arbitrary custom contigs, CRLF/empty metadata,
+path fallback/overrides, selective restart signatures, locks, reserves/mounts,
+interrupted bundles, failed checksums, owned-only cleanup and legacy-output refusal.
+
+A **mocked external-tool orchestration contract**, explicitly not a scientific
+tool test, exercises row/joint/pool scheduling, independent-unit retention,
+resume without new commands, verified disk relocation without recomputation,
+and standalone pool/joint modes without replacing full-run metadata.
+
+Environment used here: Windows, Thonny Python 3.14.4, Git for Windows Bash 5.3.9.
+The target environment remains separate Python 3.11 with the scientific version
+targets in `environment.yml`. That Linux environment has not been solved/tested here.
+
+### Required remaining release gate
+
+The four real-tool tests in `tests/test_real_tools.py` were **not run**. This
+workspace has no pairtools/cooler/BWA/SciPy installation; WSL has no usable Linux
+distribution and Docker's Linux engine is not running, confirmed outside the
+sandbox as well. Do not interpret skipped tests as passing real-tool validation.
+
+The small opt-in suite covers Micro-C, generic restriction Hi-C and original-kit
+Dovetail FASTQ-to-`.mcool`/`.hic` runs, raw binned-count equality, joint scope,
+split output roots, restart, and pinned fuzzy bridge/chunk behavior. Run it in an
+isolated target environment before production promotion:
+
+```bash
+conda env create -n microc2tracks-3.0.0-rc1 -f environment.yml
+conda activate microc2tracks-3.0.0-rc1
+MICROC2TRACKS_REAL_TOOLS=1 JUICER_TOOLS_JAR=/path/to/juicer_tools.2.18.00.jar \
+  python -m unittest discover -s tests -p test_real_tools.py -v
+```
+
+No production-data rerun or extensive benchmark is required. The historical
+server fingerprint manifest below describes the earlier synchronized commit,
+not the changed integration-candidate files.
+
 ## Installed-server source sync: 2026-10-27
 
 The [source synchronization note](docs/11_server_baseline_sync.md) records scope,

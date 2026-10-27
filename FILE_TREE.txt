@@ -4,18 +4,22 @@ microc2tracks/
   BASELINE_COMPARISON.md
   CHANGELOG_CANDIDATE.md
   FILE_TREE.txt
+  IMPLEMENTATION_STATUS.md
   README.md
+  SERVER_BASELINE_SHA256SUMS.txt
   SERVER_DEPLOYMENT_NOTES.md
   TEST_REPORT.md
   UPLOAD_MANIFEST.txt
-  environment.yml
   config/
+    config_storage_example.conf
     config_template.conf
+    hic_protocols.json
     references.tsv
+    samplesheet_dovetail_example.csv
     samplesheet_example.csv
+    samplesheet_hic_example.csv
     samplesheet_template.csv
   docs/
-    README.md
     01_analysis_and_design.md
     02_installation_server.md
     03_inputs_and_config.md
@@ -26,31 +30,47 @@ microc2tracks/
     08_light_downstream_analysis.md
     09_multi_reference.md
     10_browser_tracks.md
+    11_server_baseline_sync.md
+    12_integrated_hic_and_storage.md
+    README.md
+  environment.yml
   envs/
     downstream_optional.yml
   examples/
+    run_dovetail_hic_example.sh
     run_hic_example.sh
     run_microc_example.sh
   scripts/
+    artifact_state.py
     call_tads_from_insulation.py
     check_fastq_pair_names.py
     compare_matrices.py
     compare_saddle_plots.py
     export_insulation_bedgraph.py
+    filter_contact_pairs.py
+    matrix_products.py
     merge_replicates.sh
     microc2tracks.sh
     package_browser_tracks.py
+    pairs_processing.py
+    pipeline.py
     plot_ps_curves.py
     preflight_check.sh
     prepare_reference.sh
+    prepare_restriction_fragments.py
     reference_registry.py
     reference_sentinel.sh
     run_downstream.sh
+    run_plan.py
     sanitize_text_inputs.py
     summarize_run.py
     validate_pairs_reference.py
     validate_samplesheet.py
+    workflow_common.py
   tests/
     check_bash_syntax.sh
+    test_integration_features.py
     test_multireference.py
+    test_real_tools.py
     test_reference_sentinel.sh
+    test_server_hotfixes.py

@@ -1,74 +1,57 @@
-# Server Deployment Notes
+# Server Deployment Notes: 3.0.0-rc1
 
-This candidate is prepared for manual deployment only. No server was changed.
+This is a complete feature candidate, prepared for staged validation. No server
+installation or running analysis was changed. The real-tool release gate in
+[TEST_REPORT.md](TEST_REPORT.md) remains outstanding.
 
-## Files To Deploy
+## Safe staging
 
-Deploy the complete file set listed in `UPLOAD_MANIFEST.txt`. In particular,
-keep `scripts/reference_registry.py`, `scripts/reference_sentinel.sh`,
-`scripts/validate_pairs_reference.py`, `scripts/check_fastq_pair_names.py`, and
-`config/references.tsv` together with the updated runner, merge, preflight,
-reporting, downstream, and validator scripts.
+1. Keep the active installation and its environment untouched.
+2. Extract the complete candidate archive to a new versioned staging directory.
+   Deploy the entire set in UPLOAD_MANIFEST.txt, not selected shell scripts.
+3. Create a separate environment, for example:
 
-## Reference Preparation
+   ```bash
+   conda env create -n microc2tracks-3.0.0-rc1 -f environment.yml
+   conda activate microc2tracks-3.0.0-rc1
+   ```
 
-For each assembly, use one FASTA with UCSC-style chromosome names and derive the
-`.fai`, chromosome sizes, and BWA-MEM2 index from that exact FASTA:
+4. Run the small unit tests and opt-in synthetic real-tool tests from TEST_REPORT.
+   No production FASTQs are needed. An environment solve failure or smoke-test
+   failure must be resolved before promotion.
+5. Configure the references actually used, actual library chemistry/enzymes,
+   intentional dedup groups, resource limits and output/storage roots. Examples
+   are not server-specific deployment instructions.
+6. Run preflight against a reviewed CSV/config and a new OUTDIR. No automatic
+   adoption or deletion of old sample outputs is performed.
+7. Switch a launcher/symlink only after the real-tool gate and review succeed.
+   Retain the previous installation and environment for rollback.
 
-```bash
-bash scripts/prepare_reference.sh \
-  -f /shared/references/mm39/GRCm39.primary_assembly.genome.fa \
-  -a mm39 -o /shared/references/mm39
+## References
 
-bash scripts/prepare_reference.sh \
-  -f /shared/references/hg38/GRCh38.primary_assembly.genome.fa \
-  -a hg38 -o /shared/references/hg38
-```
+Derive FASTA index, chromosome sizes and BWA-MEM2 components from the same FASTA.
+Use the validated registry for arbitrary assemblies and contig names. The named
+mm39/hg38 browser presets keep their explicit naming policies; those policies are
+not applied to custom reference entries. Generated restriction maps live in a
+run-owned or explicitly configured cache, never in the source reference directory.
 
-Edit the two registry rows to the deployed paths. Keep mm39's exact canonical
-set at `chr1`-`chr19`, `chrX`, `chrY`, `chrM`; keep hg38's at `chr1`-`chr22`,
-`chrX`, `chrY`, `chrM`. Optional phasing tracks must match their row's assembly.
+## Storage and restart
 
-## Configuration Migration
+Prefer durable outputs on HDD and active scratch on SSD, with reserves and
+REQUIRED_STORAGE_MOUNTS configured for the actual mount points. Alternative
+category roots are optional; empty settings keep the standard OUTDIR structure.
+Publication/cleanup uses stage ownership, never recursive deletion of roots.
 
-Add to existing configs:
-
-```bash
-REFERENCE_REGISTRY="/opt/microc2tracks/config/references.tsv"
-DEFAULT_REFERENCE_ID="mm39"
-THREADS_FASTP="8"
-MAX_PARALLEL_SAMPLES="2"
-CHECK_TRIMMED_FASTQ_SYNC="false"
-```
-
-Old mouse global reference values may remain; they override the default mm39
-row. Add `reference_genome` to new sample sheets. Old sheets remain valid and
-warn while defaulting to mm39.
-
-## Staged Deployment And Validation
-
-1. Extract to a new versioned directory, not over the active installation.
-2. Edit only the staged registry/config paths.
-3. Run the syntax, compilation, unit, and preflight commands from
-   `TEST_REPORT.md`.
-4. Run a small existing mouse sample into a new output directory and compare its
-   filtering parameters, pairs counts, resolutions, and matrices with production.
-5. Run a small synthetic or pilot hg38 sample into a separate output directory.
-6. Switch a launcher/symlink only after review; retain the previous version.
-
-Reference changes invalidate completion metadata. Prefer a new `OUTDIR`. For a
-legacy mm39 resume, `ALLOW_LEGACY_MM39_RESUME=true` permits adoption of complete
-outputs lacking sentinels and immediately records mm39 metadata. Set it to
-`false` for a forced clean rebuild.
-
-The optional `CHECK_TRIMMED_FASTQ_SYNC=true` safeguard fully streams both
-alignment FASTQs. Enable it when validating a new installation or investigating
-read-name synchronization; it adds I/O and is not evidence of a universal
-`fastp` defect.
+Legacy reference-only .done files do not certify the enhanced workflow. Use a
+new OUTDIR for old-run migration/reference changes and preserve originals.
+Already accepted independent outputs can be pooled only using the documented
+input modes; joint deduplication needs original sorted pre-dedup streams.
 
 ## Rollback
 
-Stop new submissions, restore the previous launcher/symlink or versioned path,
-and point users back to the previous config. Do not reuse candidate outputs in
-the old workflow if they contain hg38 or mixed-reference data. Preserve failed
-candidate outputs/logs for diagnosis; rollback does not require deleting them.
+Stop only new submissions to the candidate, restore the earlier launcher/config
+and keep candidate output trees separate. Do not move candidate outputs into an
+old run or remove original unmerged outputs. Preserve failed stage logs and
+retained scratch for diagnosis.
+
+See [the integration/storage guide](docs/12_integrated_hic_and_storage.md).
