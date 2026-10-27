@@ -298,11 +298,13 @@ BOOTSTRAP_SENTINELS="${BOOTSTRAP_SENTINELS:-true}"
 ALLOW_LEGACY_MM39_RESUME="${ALLOW_LEGACY_MM39_RESUME:-true}"
 
 MAX_PARALLEL_SAMPLES="${MAX_PARALLEL_SAMPLES:-1}"
+MAX_PARALLEL_FASTP="${MAX_PARALLEL_FASTP:-1}"
 MAX_PARALLEL_MATRIX="${MAX_PARALLEL_MATRIX:-1}"
 MAX_PARALLEL_HIC="${MAX_PARALLEL_HIC:-1}"
 LOCK_POLL_SECONDS="${LOCK_POLL_SECONDS:-5}"
 
 require_positive_int "MAX_PARALLEL_SAMPLES" "${MAX_PARALLEL_SAMPLES}"
+require_positive_int "MAX_PARALLEL_FASTP" "${MAX_PARALLEL_FASTP}"
 require_positive_int "MAX_PARALLEL_MATRIX" "${MAX_PARALLEL_MATRIX}"
 require_positive_int "MAX_PARALLEL_HIC" "${MAX_PARALLEL_HIC}"
 require_positive_int "LOCK_POLL_SECONDS" "${LOCK_POLL_SECONDS}"
@@ -717,6 +719,7 @@ run_fastp_step() {
   local tmp_json="${fastp_json}.tmp.$$"
   local status
 
+  log_msg "${sample}: acquired fastp slot; running fastp"
   log_msg "${sample}: fastq_r1 ${fastq_r1} ($(fastq_file_summary "${fastq_r1}"))"
   log_msg "${sample}: fastq_r2 ${fastq_r2} ($(fastq_file_summary "${fastq_r2}"))"
   rm -f "${tmp_trim_r1}" "${tmp_trim_r2}" "${tmp_html}" "${tmp_json}"
@@ -845,8 +848,8 @@ process_sample() {
       if step_done "${fastp_done}" "${sample}:fastp" "${trim_r1}" "${trim_r2}" "${qc_dir}/${sample}.fastp.json"; then
         log_msg "${sample}: trimmed FASTQ exists, skipping fastp"
       else
-        log_msg "${sample}: running fastp"
-        run_fastp_step \
+        log_msg "${sample}: waiting for fastp slot (limit=${MAX_PARALLEL_FASTP})"
+        run_with_slot FASTP "${MAX_PARALLEL_FASTP}" run_fastp_step \
           "${sample}" "${fastq_r1}" "${fastq_r2}" \
           "${trim_r1}" "${trim_r2}" "${qc_dir}" "${log_dir}" \
           || exit 1

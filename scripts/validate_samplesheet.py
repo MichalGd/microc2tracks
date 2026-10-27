@@ -242,7 +242,7 @@ def validate_sheet(
 def write_normalized(path: Path, rows: list[dict[str, str]], delimiter: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=NORMALIZED_COLUMNS, delimiter=delimiter)
+        writer = csv.DictWriter(handle, fieldnames=NORMALIZED_COLUMNS, delimiter=delimiter, lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
 

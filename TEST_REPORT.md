@@ -1,5 +1,20 @@
 # Test Report
 
+## Installed-server source sync: 2026-10-27
+
+The [source synchronization note](docs/11_server_baseline_sync.md) records scope,
+commands, and limitations. Verification in the Windows preparation workspace:
+
+- Supplied installed-server fingerprints: **20/20 exact matches**.
+- Python synthetic/regression tests: **18/18 passed**, including the three new
+  normalized-line-ending and HTML-cell regression tests.
+- Bash syntax checks and reference-sentinel regression: **passed**.
+- Git whitespace check: **passed**.
+- No production-data rerun or server-side environment test was performed.
+
+The report below is the retained historical 2026-08-01 validation, not a new
+production validation.
+
 Test date: 2026-08-01 (Europe/Berlin)
 
 ## Environment

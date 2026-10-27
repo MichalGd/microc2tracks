@@ -123,7 +123,7 @@ done
 [ "${missing}" -eq 0 ] || die "Install missing required tools before running"
 
 for int_var in \
-  MAX_PARALLEL_SAMPLES MAX_PARALLEL_MATRIX MAX_PARALLEL_HIC LOCK_POLL_SECONDS \
+  MAX_PARALLEL_SAMPLES MAX_PARALLEL_FASTP MAX_PARALLEL_MATRIX MAX_PARALLEL_HIC LOCK_POLL_SECONDS \
   THREADS_FASTP THREADS_ALIGN THREADS_SORT THREADS_MATRIX THREADS_HIC_NORM
 do
   value="${!int_var:-1}"
@@ -132,7 +132,7 @@ do
   fi
 done
 
-echo "Parallel settings: samples=${MAX_PARALLEL_SAMPLES:-1}, matrix=${MAX_PARALLEL_MATRIX:-1}, hic=${MAX_PARALLEL_HIC:-1}"
+echo "Parallel settings: samples=${MAX_PARALLEL_SAMPLES:-1}, fastp=${MAX_PARALLEL_FASTP:-1}, matrix=${MAX_PARALLEL_MATRIX:-1}, hic=${MAX_PARALLEL_HIC:-1}"
 echo "Thread settings: fastp=${THREADS_FASTP}, align=${THREADS_ALIGN}, sort=${THREADS_SORT}, matrix=${THREADS_MATRIX}, hic_norm=${THREADS_HIC_NORM}"
 echo "Resolution settings: mcool=${MCOOL_RESOLUTIONS}, hic=${HIC_RESOLUTIONS}"
 

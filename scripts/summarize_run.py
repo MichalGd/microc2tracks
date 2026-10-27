@@ -361,7 +361,7 @@ def html_table(title: str, rows: list[dict[str, str]]) -> str:
     header_html = "".join(f"<th>{html.escape(header)}</th>" for header in headers)
     body = []
     for row in rows:
-        body.append("<tr>" + "".join(f"<td>{html.escape(row.get(header, ''))}</td>" for header in headers) + "</tr>")
+        body.append("<tr>" + "".join(f"<td>{html.escape(as_text(row.get(header, '')))}</td>" for header in headers) + "</tr>")
 
     return (
         f"<h2>{html.escape(title)}</h2>"

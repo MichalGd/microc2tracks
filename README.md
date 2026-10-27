@@ -4,6 +4,11 @@
 
 The first implementation follows the style of the existing Shell repositories `fastq2tracks` and `rnaseq2tracksP`: a top-level runner, `config/`, `docs/`, `examples/`, `scripts/`, `environment.yml`, and simple tests.
 
+The [2026-10-27 installed-server source synchronization](docs/11_server_baseline_sync.md)
+includes the verified production fastp concurrency guard and fixes for normalized
+TSV line endings and missing HTML report values. It does not implement the
+planned restriction-aware Hi-C or cross-input deduplication features.
+
 ## Workflow Schematic
 
 ```mermaid
