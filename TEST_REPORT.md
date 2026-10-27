@@ -1,5 +1,26 @@
 # Test Report
 
+## Refilter mode candidate 3.0.0-rc2: 2026-10-27
+
+Extends local candidate `d158d3f` with the agreed already-deduplicated input mode.
+No production analysis or server deployment was performed.
+
+- Local suite: **56 discovered, 52 passed, four real-tool tests skipped**.
+- Ten new tests cover no FASTQ/BWA requirement, skipped mapping/dedup commands,
+  matching reference/schema checks, end swapping and stale-fragment removal,
+  preserved multiplicity, correct restriction/cis boundaries, new-root safeguards,
+  source/index immutability, overlapping pools, restart and ignored unused settings.
+- The mocked orchestration contract rebuilds both output branches and proves no
+  dedup command is invoked; this is not real scientific-tool validation.
+- The generic opt-in Hi-C smoke test now additionally imports its jointly
+  deduplicated pre-selection pairs, refilters/rebuilds products and compares raw
+  bin counts while checking source preservation. It has not been run here.
+
+The existing Linux environment/real-tool release gate below still applies. Use a
+separate `microc2tracks-3.0.0-rc2` environment when running those checks. Source
+input deduplication is an explicit user assertion, not verified or repaired by
+this mode. See [the mode guide](docs/13_refilter_deduplicated_inputs.md).
+
 ## Integrated update candidate 3.0.0-rc1: 2026-10-27
 
 Baseline: published `main` commit `0ce6761` (the verified installed-server source

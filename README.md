@@ -4,12 +4,17 @@
 
 The first implementation follows the style of the existing Shell repositories `fastq2tracks` and `rnaseq2tracksP`: a top-level runner, `config/`, `docs/`, `examples/`, `scripts/`, `environment.yml`, and simple tests.
 
-Version **3.0.0-rc1** implements integrated restriction Hi-C, user-selected joint
+Version **3.0.0-rc2** implements integrated restriction Hi-C, user-selected joint
 deduplication, disjoint pooling and optional output disks. Read the
 [integration/storage guide](docs/12_integrated_hic_and_storage.md) before upgrading.
 It preserves the [earlier server fixes](docs/11_server_baseline_sync.md).
 This candidate still requires the tiny real-tool Linux smoke tests before
 production promotion; see [the test report](TEST_REPORT.md).
+
+Existing mapped, deduplicated `.pairs`/`.pairs.gz` can be reprocessed with
+`--mode refilter-deduplicated`, skipping alignment and deduplication. See the
+[refilter mode guide](docs/13_refilter_deduplicated_inputs.md) for its separate
+CSV schema, read-only input safeguards and restriction/distance settings.
 
 ## Workflow Schematic
 
@@ -87,6 +92,7 @@ Optional heavier downstream scripts can generate:
 | Canonical chromosomes | Optional canonical chromosome filter before `.cool`, `.mcool`, and `.hic` generation | UCSC-friendlier matrices and `.hic` files | enabled by default |
 | Hi-C support | Shared workflow with explicit protocol, digest and artifact policy | annotated accepted pairs, QC, `.mcool`, `.hic` | implemented in candidate |
 | Joint deduplication | User-selected dedup_group, original sorted streams, one joint pass | independent row outputs and joint-unit pairs/QC | implemented in candidate |
+| Refilter old mapped pairs | Import already-deduplicated pairs, skip mapping/dedup, apply current filters | new accepted pairs, QC and rebuilt matrices | implemented in candidate |
 | Biological pooling | Optional all-sample aggregate of disjoint units, without global dedup | explicitly named pooled matrices | implemented in candidate |
 | Multi-disk storage | Optional pairs/matrix/trim/cache roots; SSD scratch; HDD final output | resolved paths and verified transfers | implemented in candidate |
 | Matrix generation | Raw and balanced single-resolution and multiresolution matrices | `.cool`, `.mcool` | implemented |

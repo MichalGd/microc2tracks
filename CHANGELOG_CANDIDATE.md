@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased - 3.0.0-rc2 (2026-10-27)
+
+- Added `--mode refilter-deduplicated` to the existing runner/preflight, also
+  selectable with `WORKFLOW_MODE`. Default FASTQ mode is unchanged.
+- Added an explicit CSV schema for existing deduplicated mapped pairs, with no
+  new-version sidecar requirement and no FASTQ/BWA-index requirement.
+- Skips trimming, alignment, parsing and deduplication. Streams validated input
+  through canonicalization, restriction/distance selection, sorting/indexing and
+  the same matrix builders; no extra full-size imported copy is retained.
+- Keeps source pairs/indexes read-only, requires new output roots, records prior
+  deduplication as a user assertion, and detects declared/physical input overlaps.
+- Adds per-input import QC, source/provenance identity checks, policy-specific
+  restart, examples and ten focused tests. The generic real-tool Hi-C smoke test
+  now also covers refiltering a joint dedup stream; real-tool execution remains
+  an outstanding release gate, not a claimed pass.
+
 ## Unreleased - 3.0.0-rc1 (2026-10-27)
 
 One complete integration candidate; not yet promoted to production.

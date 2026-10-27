@@ -63,7 +63,7 @@ def tool_versions(plan):
     c = plan["settings"]
     matrices = bool(plan["pools"]) or truth(c["BUILD_SAMPLE_MATRICES"]) or any(e.get("build_matrices") for e in plan["entities"].values())
     tools = ["pairtools", "bgzip", "pairix"]
-    if plan["samples"]:
+    if plan["samples"] and plan.get("workflow_mode") != "refilter-deduplicated":
         tools += ["bwa-mem2"]
         if truth(c["RUN_FASTP"]):
             tools += ["fastp"]
@@ -106,7 +106,8 @@ class Runtime:
         self.guard = storage_guard(plan)
         self.guard.check()
         self.versions = versions or tool_versions(plan)
-        self.jar_identity = identity(Path(self.c["JUICER_TOOLS_JAR"]), True) if self.c["JUICER_TOOLS_JAR"] and truth(self.c["RUN_HIC"]) else {}
+        matrices = bool(plan["pools"]) or truth(self.c["BUILD_SAMPLE_MATRICES"]) or any(e.get("build_matrices") for e in plan["entities"].values())
+        self.jar_identity = identity(Path(self.c["JUICER_TOOLS_JAR"]), True) if matrices and self.c["JUICER_TOOLS_JAR"] and truth(self.c["RUN_HIC"]) else {}
         scratch_root = Path(plan["roots"]["scratch"])
         scratch_root.mkdir(parents=True, exist_ok=True)
         self.scratch = Path(tempfile.mkdtemp(prefix="run_", dir=scratch_root))
@@ -224,7 +225,9 @@ def write_manifests(plan):
         rows.append({**sample, "reference_id": entity["reference_id"], "species": ref["species"], "assembly": ref["assembly"],
                      "browser_preset": ref["browser_preset"], "sample_dir": entity["paths"]["entity_dir"],
                      "pairs_dir": entity["paths"]["pairs_dir"], "matrix_dir": entity["paths"]["matrix_dir"],
-                     "merge_group": sample["resolved_merge_group"]})
+                     "merge_group": sample["resolved_merge_group"], "workflow_mode": plan.get("workflow_mode", "fastq"),
+                     "input_stage": entity.get("input_stage", "fastq"), "deduplicated_pairs": sample.get("deduplicated_pairs", ""),
+                     "input_members": ";".join(sample.get("input_members", [name]))})
         tech.append({"merge_group": sample["resolved_merge_group"], "sample": name, "pairs": entity["paths"]["accepted"],
                      "reference_id": entity["reference_id"], "dedup_unit": sample["unit"]})
     for name, key in plan["pools"].items():
@@ -235,7 +238,8 @@ def write_manifests(plan):
                        "dedup_units": ",".join(entity["units"]), "merge_dir": entity["paths"]["entity_dir"],
                        "pairs_dir": entity["paths"]["pairs_dir"], "matrix_dir": entity["paths"]["matrix_dir"], "pool_type": entity["pool_type"]})
     tsv_write(out / "sample_manifest.tsv", rows, ["sample", "assay", "reference_id", "species", "assembly", "browser_preset", "condition",
-        "biological_replicate", "technical_replicate", "merge_group", "dedup_group", "hic_protocol", "restriction_enzymes", "fastq_r1", "fastq_r2", "sample_dir", "pairs_dir", "matrix_dir"])
+        "biological_replicate", "technical_replicate", "merge_group", "dedup_group", "hic_protocol", "restriction_enzymes", "fastq_r1", "fastq_r2", "sample_dir", "pairs_dir", "matrix_dir",
+        "workflow_mode", "input_stage", "deduplicated_pairs", "input_members"])
     tsv_write(out / "technical_replicates.tsv", tech, ["merge_group", "sample", "pairs", "reference_id", "dedup_unit"])
     tsv_write(out / "merge_manifest.tsv", merges, ["merge_group", "reference_id", "assembly", "browser_preset", "members", "dedup_units", "merge_dir", "pairs_dir", "matrix_dir", "pool_type"])
     for key, unit in plan["dedup_units"].items():
@@ -305,7 +309,7 @@ def run_entity(rt, processor, matrices, key):
                 "runtime_seconds": int(time.time()-started), "error": error}],
                 ["sample", "merge_group", "reference_id", "assembly", "status", "start_epoch", "end_epoch", "runtime_seconds", "error"])
         write_status(status)
-        log(f"{key}: processing {len(entity['members'])} row(s); profile={entity['policy']['profile']}")
+        log(f"{key}: processing {len(entity['members'])} source member(s); profile={entity['policy']['profile']}")
         try:
             processor.ensure_accepted(key)
             processor.stats(key)
@@ -514,6 +518,7 @@ def manual_plan(c, args):
         "paths": artifact_paths(roots, f"merged/{name}", name, c)}
     if args.mode == "pool":
         entities[key]["provenance_units"] = sorted({unit for proof in proofs for unit in proof["dedup_units"]})
+        entities[key]["import_sources"] = [source for proof in proofs for source in proof.get("import_sources", [])]
     return {"schema_version": 1, "workflow_version": VERSION, "settings": c, "roots": roots,
             "metadata_dir": str(Path(roots["out"]) / "run_metadata/manual_merges" / name), "references": {ref.reference_id: reference},
             "samples": {}, "entities": entities, "dedup_units": units, "pools": {name: key} if args.mode != "joint-dedup" else {}, "warnings": [], "manual": True}
@@ -528,6 +533,7 @@ def main():
         p.add_argument("-c", "--config", type=Path, required=True)
         if command != "merge":
             p.add_argument("-s", "--samplesheet", type=Path, required=True)
+            p.add_argument("--mode", choices=["fastq", "refilter-deduplicated"], help="Override WORKFLOW_MODE; refilter skips alignment and deduplication")
         else:
             p.add_argument("-n", "--name", required=True)
             p.add_argument("-r", "--reference", default="")
@@ -536,12 +542,12 @@ def main():
     args = parser.parse_args()
     try:
         c = load_config(args.config)
-        plan = manual_plan(c, args) if args.command == "merge" else build_plan(c, args.samplesheet)
+        plan = manual_plan(c, args) if args.command == "merge" else build_plan(c, args.samplesheet, mode=args.mode)
         for warning in plan["warnings"]:
             log("WARNING: " + warning)
         if args.command == "preflight":
             validate_existing_layout(plan)
-            print(json.dumps({"storage": storage_guard(plan).check(), "samples": len(plan["samples"]),
+            print(json.dumps({"workflow_mode": plan.get("workflow_mode", "merge"), "storage": storage_guard(plan).check(), "samples": len(plan["samples"]),
                 "dedup_units": plan["dedup_units"], "pools": plan["pools"], "tool_versions": tool_versions(plan)}, indent=2))
             log("Preflight successful; no analysis launched or output files adopted")
             return 0

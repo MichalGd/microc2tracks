@@ -28,3 +28,4 @@ flowchart TD
 | `10_browser_tracks.md` | Assembly-explicit UCSC/HiGlass packaging and chromosome-name behavior. |
 | `11_server_baseline_sync.md` | Historical source-identical server synchronization before the integration update. |
 | `12_integrated_hic_and_storage.md` | Integrated restriction Hi-C, joint deduplication, pooling, optional disks, restart and minimum tests. |
+| `13_refilter_deduplicated_inputs.md` | Refilter existing deduplicated pairs without alignment or another dedup pass; input schema, provenance, preservation and examples. |

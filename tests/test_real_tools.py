@@ -20,7 +20,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 from reference_registry import REGISTRY_COLUMNS
-from workflow_common import DEFAULTS, text_open
+from workflow_common import DEFAULTS, text_open, sha256
 
 
 @unittest.skipUnless(os.environ.get("MICROC2TRACKS_REAL_TOOLS") == "1", "opt-in Linux scientific tools not requested")
@@ -125,6 +125,45 @@ class RealTools(unittest.TestCase):
             result = subprocess.run([sys.executable, str(ROOT / "scripts/pipeline.py"), "run", "-c", str(config), "-s", str(sheet)], stdout=out, stderr=subprocess.STDOUT)
         self.assertEqual(result.returncode, 0, run_log.read_text())
         self.assertEqual(Path(paths["norm_mcool"]).stat().st_mtime_ns, before)
+
+        if assay == "hic" and profile == "restriction_hic":
+            # Refilter the already jointly deduplicated stream, before cis/fragment
+            # selection, without repeating alignment or deduplication.
+            source = Path(plan["entities"]["dedup:joint"]["paths"]["dedup"])
+            original_hash = sha256(source)
+            refilter_sheet = work / "refilter.csv"
+            with refilter_sheet.open("w", newline="") as out:
+                writer = csv.DictWriter(out, ["sample", "assay", "reference_genome", "deduplicated_pairs", "input_members"])
+                writer.writeheader()
+                writer.writerow({"sample": "existing_joint", "assay": "hic", "reference_genome": "toy",
+                                 "deduplicated_pairs": str(source), "input_members": "part1;part2"})
+            imported_values = {**values, "WORKFLOW_MODE": "refilter-deduplicated", "OUTDIR": str(work / "refilter_out"),
+                "PAIRS_OUTDIR": str(work / "refilter_pairs"), "MATRIX_OUTDIR": str(work / "refilter_matrices"),
+                "TRIMMED_OUTDIR": "", "RUN_MERGE_ALL_SAMPLES": "false", "RUN_FASTP": "true", "HIC_MIN_CIS_DIST": "5000"}
+            refilter_config = work / "refilter.conf"
+            refilter_config.write_text("".join(f"{key}={shlex.quote(str(value))}\n" for key,value in imported_values.items()))
+            with run_log.open("a") as out:
+                result = subprocess.run([sys.executable, str(ROOT / "scripts/pipeline.py"), "run", "-c", str(refilter_config), "-s", str(refilter_sheet)], stdout=out, stderr=subprocess.STDOUT)
+            self.assertEqual(result.returncode, 0, run_log.read_text())
+            imported_plan = json.loads((work / "refilter_out/run_metadata/run_plan.json").read_text())
+            imported_paths = imported_plan["entities"]["sample:existing_joint"]["paths"]
+            imported_clr = cooler.Cooler(imported_paths["norm_mcool"] + "::resolutions/1000")
+            self.assertEqual(imported_clr.info["sum"], expected_count)
+            for skipped in ("trim", "sorted", "dedup"):
+                self.assertFalse((Path(imported_paths["done"]) / f"{skipped}.json").exists())
+            imported_hic_counts = {}
+            for i, c1 in enumerate(self.sequences):
+                for c2 in list(self.sequences)[i:]:
+                    dump = work / f"refilter_{c1}_{c2}.dump.tsv"
+                    subprocess.run(["java", "-Xmx1g", "-jar", str(self.jar), "dump", "observed", "NONE", imported_paths["norm_hic"], c1, c2, "BP", "1000", str(dump)], check=True)
+                    for line in dump.read_text().splitlines():
+                        x,y,count = line.split()
+                        if float(count):
+                            x,y = int(x),int(y)
+                            if c1==c2 and x>y: x,y=y,x
+                            imported_hic_counts[(c1,x,c2,y)] = float(count)
+            self.assertEqual(imported_hic_counts, cooler_counts)
+            self.assertEqual(sha256(source), original_hash)
 
     def test_tiny_microc_full_workflow(self):
         self.run_fixture("microc", "restriction_hic")

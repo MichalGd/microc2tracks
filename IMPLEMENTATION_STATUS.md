@@ -1,4 +1,4 @@
-# Integrated update handoff: 3.0.0-rc1
+# Integrated update handoff: 3.0.0-rc2
 
 Prepared: 2026-10-27. Base: `0ce6761` (published server-source synchronization).
 Local branch: `feature/integrated-hic-storage-20261027`.
@@ -15,10 +15,13 @@ Local branch: `feature/integrated-hic-storage-20261027`.
   parameter-aware restart, safe managed relocation, locks and owned cleanup.
 - Path-aware reports/browser packaging, generic examples, target version pins,
   and small scientific/contract tests.
+- Explicit refilter-deduplicated run mode for existing mapped pairs: no alignment,
+  parsing or deduplication, read-only sources/indexes, new output tree, import QC
+  and the shared restriction/distance/matrix path. See [the refilter guide](docs/13_refilter_deduplicated_inputs.md).
 
 ## Verification and release gate
 
-42 local tests passed; four opt-in real-tool tests were skipped. Python
+52 local tests passed; four opt-in real-tool tests were skipped. Python
 compilation, Bash syntax/sentinel checks, shell help routes, example CSV validation,
 browser help and Git whitespace checks passed. The runner contract includes
 mocked external commands, not proof of real BWA/pairtools/cooler/Java behavior.

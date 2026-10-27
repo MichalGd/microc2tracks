@@ -9,6 +9,7 @@ from pathlib import Path
 
 from prepare_restriction_fragments import prepare
 from reference_registry import read_sizes
+from refilter_inputs import validate_snapshot
 from workflow_common import ROOT, identity, json_write, signature, truth
 
 
@@ -20,7 +21,7 @@ def read_proof(path: Path) -> dict:
     try:
         return json.loads(proof_path(path).read_text())
     except FileNotFoundError as exc:
-        raise ValueError(f"Missing stage provenance for {path}. Use original sorted streams for joint-dedup; only already accepted legacy pairs may use explicit --mode legacy-pool.") from exc
+        raise ValueError(f"Missing stage provenance for {path}. Joint-dedup requires original sorted streams. Refilter existing deduplicated pairs with microc2tracks.sh --mode refilter-deduplicated; only already accepted legacy pairs may use merge --mode legacy-pool.") from exc
 
 
 class PairProcessor:
@@ -29,6 +30,10 @@ class PairProcessor:
         self.keys = {}
         for name, row in self.plan["samples"].items():
             ref = self.plan["references"][row["reference_genome"]]
+            if self.plan.get("workflow_mode") == "refilter-deduplicated":
+                self.keys[f"sample:{name}"] = {"input": runtime.key("deduplicated_input", {"pairs": row["input_identity"],
+                    "upstream_provenance": row["input_header"]["sidecar_identity"]}, [], ["refilter_inputs.py"])}
+                continue
             trim = runtime.key("trim", {"inputs": [identity(Path(row[k])) for k in ("fastq_r1", "fastq_r2")],
                                        "run_fastp": self.c["RUN_FASTP"], "fastp_args": self.c["FASTP_EXTRA_ARGS"]}, ["fastp"])
             sorted_key = runtime.key("sorted", {"trim": trim, "reference": ref["identity"],
@@ -37,6 +42,12 @@ class PairProcessor:
         for key, entity in self.plan["entities"].items():
             if entity["kind"] in {"external", "external_sorted"}:
                 self.keys[key] = {"sorted" if entity["kind"] == "external_sorted" else "accepted": entity["source_signature"]}
+                continue
+            if entity.get("input_stage") == "deduplicated":
+                accepted = runtime.key("refilter_deduplicated", {"input": self.keys[key]["input"], "policy": entity["policy"],
+                    "reference": self.plan["references"][entity["reference_id"]]["identity"], "members": entity["members"]},
+                    ["pairtools", "pairix"], ["pairs_processing.py", "refilter_inputs.py", "filter_contact_pairs.py", "prepare_restriction_fragments.py"])
+                self.keys[key]["accepted"] = accepted
                 continue
             if entity["kind"] == "dedup":
                 self.keys[key] = {"sorted": runtime.key("joint_sorted", {"members": entity["members"],
@@ -54,7 +65,7 @@ class PairProcessor:
                     "sources": [self.keys[unit]["accepted"] for unit in entity["units"]]}, ["pairtools"], ["pairs_processing.py"])}
 
     def provenance(self, entity, stage, key, data_path):
-        return {"schema": 1, "stage": stage, "signature": key, "reference_id": entity["reference_id"],
+        result = {"schema": 1, "stage": stage, "signature": key, "reference_id": entity["reference_id"],
                 "assembly": self.plan["references"][entity["reference_id"]]["assembly"],
                 "reference_identity": self.plan["references"][entity["reference_id"]]["identity"],
                 "policy": entity["policy"], "members": entity["members"], "dedup_units": entity.get("provenance_units", entity["units"]),
@@ -63,6 +74,17 @@ class PairProcessor:
                 "qc": entity["paths"]["filter_qc"],
                 "parse_settings": {k: v for k, v in self.c.items() if k.startswith("PAIRTOOLS_") and "MEMORY" not in k},
                 "dedup_settings": {k: v for k, v in self.c.items() if k.startswith("DEDUP_")}}
+        if self.plan.get("workflow_mode") == "refilter-deduplicated":
+            result.update(input_stage="deduplicated", alignment_performed=False, parsing_performed=False, deduplication_performed=False,
+                          dedup_settings=None, parse_settings=None,
+                          deduplication_status="Assumed from user-declared input; not independently verified or repaired")
+            result["import_sources"] = [{"sample": row, "identity": self.plan["samples"][row]["input_identity"],
+                "input_members": self.plan["samples"][row]["input_members"], "previous_filter_policy": self.plan["samples"][row]["input_header"]["previous_filter_policy"]}
+                for row in entity["source_rows"]]
+        elif entity.get("import_sources"):
+            result.update(import_sources=entity["import_sources"], dedup_settings=None, deduplication_performed=False,
+                          deduplication_status="Inherited user-declared deduplication; pooling does not deduplicate")
+        return result
 
     def write_proof(self, temporary, entity, stage, key, destination, extra=None):
         proof = self.provenance(entity, stage, key, destination)
@@ -74,6 +96,8 @@ class PairProcessor:
 
     def ensure_sorted(self, key):
         entity, keys = self.plan["entities"][key], self.keys[key]
+        if entity.get("input_stage") == "deduplicated":
+            raise RuntimeError("Alignment/parse stages are disabled in refilter-deduplicated mode")
         if entity["kind"] == "external_sorted":
             return Path(entity["paths"]["sorted"])
         paths, store = entity["paths"], self.rt.store(entity)
@@ -127,6 +151,8 @@ class PairProcessor:
 
     def ensure_dedup(self, key):
         entity, keys = self.plan["entities"][key], self.keys[key]
+        if entity.get("input_stage") == "deduplicated":
+            raise RuntimeError("Deduplication is disabled in refilter-deduplicated mode")
         paths, store = entity["paths"], self.rt.store(entity)
         destination = Path(paths["dedup"])
         outputs = {"pairs": destination, "stats": Path(paths["dedup_stats"]), "provenance": proof_path(destination)}
@@ -159,6 +185,9 @@ class PairProcessor:
         destination = Path(paths["accepted"])
         outputs = {"pairs": destination, "index": Path(str(destination) + ".px2"),
                    "qc": Path(paths["filter_qc"]), "provenance": proof_path(destination)}
+        imported = entity.get("input_stage") == "deduplicated"
+        if imported:
+            outputs["import_qc"] = Path(paths["import_qc"])
         self.ensure_chrom_sizes(entity)
         if store.ensure_reusable("accepted", keys["accepted"], outputs):
             return destination
@@ -188,7 +217,7 @@ class PairProcessor:
                 if entity.get("legacy_pool"):
                     raw.unlink()
         else:
-            source = self.ensure_dedup(key)
+            source = Path(self.plan["samples"][entity["name"]]["deduplicated_pairs"]) if imported else self.ensure_dedup(key)
             policy_file = Path(paths["policy"])
             json_write(policy_file, entity["policy"])
             ref = self.plan["references"][entity["reference_id"]]
@@ -205,7 +234,25 @@ class PairProcessor:
                            "--chrom-sizes", ref["chrom_sizes"], "--matrix-chrom-sizes", paths["chrom_sizes"], "--qc", str(t["qc"])]
                 if digest:
                     command += ["--digest", str(digest)]
-                self.rt.pipeline([command, ["bgzip", "-@", self.c["THREADS_SORT"]]], t["pairs"], self.rt.log(entity, "filter"))
+                commands = [command]
+                if imported:
+                    row = self.plan["samples"][entity["name"]]
+                    validate_snapshot(row)
+                    expected = work / "expected_input.json"
+                    json_write(expected, row["input_identity"])
+                    command[command.index("--input")+1] = "-"
+                    commands = [[sys.executable, str(ROOT / "scripts/refilter_inputs.py"), "--input", str(source),
+                        "--chrom-sizes", ref["chrom_sizes"], "--expected-identity", str(expected), "--qc", str(t["import_qc"])], command,
+                        ["pairtools", "sort", "--nproc", self.c["THREADS_SORT"], "--memory", self.c["PAIRTOOLS_SORT_MEMORY"], "--tmpdir", str(work)]]
+                commands.append(["bgzip", "-@", self.c["THREADS_SORT"]])
+                self.rt.pipeline(commands, t["pairs"], self.rt.log(entity, "filter"))
+                if imported:
+                    validate_snapshot(row)
+                    qc = json.loads(t["qc"].read_text())
+                    qc["import"] = json.loads(t["import_qc"].read_text())
+                    qc["previous_filter_policy"] = row["input_header"]["previous_filter_policy"]
+                    json_write(t["qc"], qc)
+                    expected.unlink()
                 if json.loads(t["qc"].read_text())["exclusive_counts"]["accepted"] == 0:
                     raise ValueError(f"No accepted contacts for {entity['id']}; inspect retained QC at {t['qc']} before matrix generation")
                 self.rt.command(["pairix", "-f", str(t["pairs"])], self.rt.log(entity, "pairix"))
@@ -221,13 +268,19 @@ class PairProcessor:
 
 
 def validate_pool_inputs(sources: list[Path]) -> list[dict]:
-    units, policies, members, proofs = set(), set(), set(), []
+    units, policies, members, proofs, imported_inputs = set(), set(), set(), [], set()
     for source in sources:
         proof = read_proof(source)
         verify_proof_payload(source, proof)
         if proof.get("stage") != "accepted" or not proof.get("poolable"):
             raise ValueError(f"Pool needs accepted disjoint units, not a pre-dedup stream or a row assigned to joint dedup: {source}")
         current = set(proof["dedup_units"])
+        for imported in proof.get("import_sources", []):
+            item = imported["identity"]
+            source_key = (item["device"], item["inode"]) if item.get("inode") else item["path"]
+            if source_key in imported_inputs:
+                raise ValueError("Pool inputs overlap: an imported physical source would be counted twice")
+            imported_inputs.add(source_key)
         if current & units or set(proof["members"]) & members:
             raise ValueError("Pool inputs overlap: a dedup unit/member would be counted twice")
         units.update(current)

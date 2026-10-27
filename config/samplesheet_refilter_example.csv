@@ -1,0 +1,3 @@
+sample,assay,reference_genome,deduplicated_pairs,hic_protocol,restriction_enzymes,input_members
+existing_library_A,hic,my_reference,/data/old_run/libraryA.dedup.pairs.gz,restriction_hic,DpnII,libraryA_part1;libraryA_part2
+existing_library_B,hic,my_reference,/data/old_run/libraryB.dedup.pairs.gz,restriction_hic,DpnII,libraryB

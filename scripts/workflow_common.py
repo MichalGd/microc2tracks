@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import contextlib
 import gzip
 import hashlib
 import json
@@ -9,12 +10,14 @@ import os
 import re
 import shlex
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-VERSION = "3.0.0-rc1"
+VERSION = "3.0.0-rc2"
 DEFAULTS = {
+    "WORKFLOW_MODE": "fastq",
     "OUTDIR": "results", "TMPDIR": "", "PAIRS_OUTDIR": "", "MATRIX_OUTDIR": "",
     "TRIMMED_OUTDIR": "", "REFERENCE_CACHE_DIR": "", "LARGE_OUTPUT_STAGING": "destination",
     "REQUIRED_STORAGE_MOUNTS": "", "MIN_FREE_OUTPUT_GB": "10", "MIN_FREE_SCRATCH_GB": "20",
@@ -104,6 +107,8 @@ def load_config(path: Path) -> dict[str, str]:
 
 
 def validate_config(c: dict[str, str]) -> None:
+    if c["WORKFLOW_MODE"] not in {"fastq", "refilter-deduplicated"}:
+        raise ValueError("WORKFLOW_MODE must be fastq/refilter-deduplicated")
     if not c["OUTDIR"].strip():
         raise ValueError("OUTDIR must not be empty")
     for key in c:
@@ -173,7 +178,9 @@ def identity(path: Path, content: bool = False) -> dict:
 
 
 def text_open(path: Path):
-    return gzip.open(path, "rt", encoding="utf-8") if path.suffix == ".gz" else path.open(encoding="utf-8")
+    if str(path) == "-":
+        return contextlib.nullcontext(sys.stdin)
+    return gzip.open(path, "rt", encoding="utf-8") if path.suffix.lower() == ".gz" else path.open(encoding="utf-8")
 
 
 def registry_data(path: Path) -> dict:

@@ -18,6 +18,7 @@ microc2tracks/
     samplesheet_dovetail_example.csv
     samplesheet_example.csv
     samplesheet_hic_example.csv
+    samplesheet_refilter_example.csv
     samplesheet_template.csv
   docs/
     01_analysis_and_design.md
@@ -32,6 +33,7 @@ microc2tracks/
     10_browser_tracks.md
     11_server_baseline_sync.md
     12_integrated_hic_and_storage.md
+    13_refilter_deduplicated_inputs.md
     README.md
   environment.yml
   envs/
@@ -40,6 +42,7 @@ microc2tracks/
     run_dovetail_hic_example.sh
     run_hic_example.sh
     run_microc_example.sh
+    run_refilter_deduplicated_example.sh
   scripts/
     artifact_state.py
     call_tads_from_insulation.py
@@ -60,6 +63,7 @@ microc2tracks/
     prepare_restriction_fragments.py
     reference_registry.py
     reference_sentinel.sh
+    refilter_inputs.py
     run_downstream.sh
     run_plan.py
     sanitize_text_inputs.py
@@ -73,4 +77,5 @@ microc2tracks/
     test_multireference.py
     test_real_tools.py
     test_reference_sentinel.sh
+    test_refilter_mode.py
     test_server_hotfixes.py

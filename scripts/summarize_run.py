@@ -457,9 +457,11 @@ def write_plan_summary(plan: dict, outdir: Path) -> None:
         dedup = parse_pairtools_stats(Path(paths["dedup_stats"]))
         policy = entity["policy"]
         row = {"entity": key, "kind": entity["kind"], "sample": entity["name"], "reference_id": entity["reference_id"],
+               "workflow_mode": plan.get("workflow_mode", "merge"), "input_stage": entity.get("input_stage", "fastq"),
+               "deduplicated_input": plan["samples"].get(entity["name"], {}).get("deduplicated_pairs", ""),
                "assay": policy["assay"], "profile": policy["profile"], "restriction_enzymes": "+".join(policy["enzymes"]),
                "min_cis_dist": str(policy["min_cis_dist"]), "members": ",".join(entity["members"]),
-               "filtering_provenance": qc.get("limited_provenance", "stage-verified"),
+               "filtering_provenance": qc.get("limited_provenance", "stage-verified filtering; input deduplication user-asserted" if plan.get("workflow_mode") == "refilter-deduplicated" else "stage-verified"),
                "dedup_units": ",".join(entity["units"]), "status": status.get("status", "not_started"),
                "dedup_total": dedup.get("total", ""), "dedup_total_nodups": dedup.get("total_nodups", ""),
                "dedup_total_dups": dedup.get("total_dups", ""), "valid_pairs_total": as_text(qc.get("exclusive_counts", {}).get("accepted")),

@@ -186,7 +186,7 @@ def require_readable(path: Path, label: str, errors: list[str]) -> bool:
     return True
 
 
-def validate_reference_files(ref: Reference) -> list[str]:
+def validate_reference_files(ref: Reference, *, require_bwa: bool = True) -> list[str]:
     errors: list[str] = []
     fasta = Path(ref.fasta)
     fai = Path(f"{ref.fasta}.fai")
@@ -194,8 +194,9 @@ def validate_reference_files(ref: Reference) -> list[str]:
     fasta_ok = require_readable(fasta, f"{ref.reference_id} FASTA", errors)
     fai_ok = require_readable(fai, f"{ref.reference_id} FASTA index (.fai)", errors)
     chrom_ok = require_readable(chrom_sizes, f"{ref.reference_id} chromosome sizes", errors)
-    for suffix in BWA_MEM2_INDEX_SUFFIXES:
-        require_readable(Path(f"{ref.bwa_index_prefix}{suffix}"), f"{ref.reference_id} BWA-MEM2 index component", errors)
+    if require_bwa:
+        for suffix in BWA_MEM2_INDEX_SUFFIXES:
+            require_readable(Path(f"{ref.bwa_index_prefix}{suffix}"), f"{ref.reference_id} BWA-MEM2 index component", errors)
 
     if fai_ok and chrom_ok:
         try:

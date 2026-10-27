@@ -1,4 +1,4 @@
-# Server Deployment Notes: 3.0.0-rc1
+# Server Deployment Notes: 3.0.0-rc2
 
 This is a complete feature candidate, prepared for staged validation. No server
 installation or running analysis was changed. The real-tool release gate in
@@ -12,8 +12,8 @@ installation or running analysis was changed. The real-tool release gate in
 3. Create a separate environment, for example:
 
    ```bash
-   conda env create -n microc2tracks-3.0.0-rc1 -f environment.yml
-   conda activate microc2tracks-3.0.0-rc1
+   conda env create -n microc2tracks-3.0.0-rc2 -f environment.yml
+   conda activate microc2tracks-3.0.0-rc2
    ```
 
 4. Run the small unit tests and opt-in synthetic real-tool tests from TEST_REPORT.
@@ -46,6 +46,9 @@ Legacy reference-only .done files do not certify the enhanced workflow. Use a
 new OUTDIR for old-run migration/reference changes and preserve originals.
 Already accepted independent outputs can be pooled only using the documented
 input modes; joint deduplication needs original sorted pre-dedup streams.
+To apply new restriction/distance filtering to old mapped, deduplicated pairs,
+use the explicit [refilter mode](docs/13_refilter_deduplicated_inputs.md), a refilter
+CSV, and a new output tree. No alignment/deduplication stage is repeated.
 
 ## Rollback
 

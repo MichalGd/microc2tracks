@@ -1,4 +1,4 @@
-# Integrated Hi-C, joint deduplication and optional storage roots (3.0.0-rc1)
+# Integrated Hi-C, joint deduplication and optional storage roots (3.0.0-rc2)
 
 This is one update to **microc2tracks**, not a second Hi-C pipeline. The existing
 commands remain:
@@ -10,6 +10,10 @@ bash scripts/microc2tracks.sh -c config/config.conf -s config/samplesheet.csv
 
 The shell entry points share Python helpers for planning, pair processing,
 matrix generation, artifact state and publication. No workflow engine is added.
+To start from existing mapped, already-deduplicated pairs, use the explicit
+[refilter-deduplicated run mode](13_refilter_deduplicated_inputs.md). It skips
+alignment/deduplication and writes a separate output tree; it does not adopt
+legacy files as new-stage completion proof.
 Example paths, references, sample names and resource values are illustrative.
 No server installation or production output is automatically changed.
 
