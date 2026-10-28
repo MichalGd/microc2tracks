@@ -26,7 +26,7 @@ from matrix_products import MatrixProducts
 from pairs_processing import PairProcessor, proof_path, read_proof, validate_pool_inputs, verify_proof_payload
 from reference_registry import Registry
 from run_plan import artifact_paths, build_plan, resolve_roots
-from workflow_common import ROOT, VERSION, absolute, identity, json_write, load_config, resolve_policy, safe_id, sha256, signature, text_open, truth, tsv_write
+from workflow_common import ROOT, VERSION, absolute, annotate_hic_outputs, builds_hic, builds_matrices, hic_targets, identity, json_write, load_config, resolve_policy, safe_id, sha256, signature, text_open, truth, tsv_write
 
 
 def log(message):
@@ -61,7 +61,7 @@ def validate_existing_layout(plan):
 
 def tool_versions(plan):
     c = plan["settings"]
-    matrices = bool(plan["pools"]) or truth(c["BUILD_SAMPLE_MATRICES"]) or any(e.get("build_matrices") for e in plan["entities"].values())
+    matrices = any(builds_matrices(e, c) for e in plan["entities"].values())
     tools = ["pairtools", "bgzip", "pairix"]
     if plan["samples"] and plan.get("workflow_mode") != "refilter-deduplicated":
         tools += ["bwa-mem2"]
@@ -71,10 +71,10 @@ def tool_versions(plan):
         tools += ["multiqc"]
     if matrices:
         tools += ["cooler"]
-        if truth(c["RUN_HIC"]):
+        if hic_targets(plan):
             tools += ["java"]
             if not Path(c["JUICER_TOOLS_JAR"]).is_file():
-                raise ValueError("RUN_HIC=true requires JUICER_TOOLS_JAR")
+                raise ValueError("Requested .hic outputs require JUICER_TOOLS_JAR")
     missing = [name for name in tools if not shutil.which(name)]
     if missing:
         raise RuntimeError("Missing required tools: " + ", ".join(missing) + "; create the release environment first")
@@ -106,8 +106,7 @@ class Runtime:
         self.guard = storage_guard(plan)
         self.guard.check()
         self.versions = versions or tool_versions(plan)
-        matrices = bool(plan["pools"]) or truth(self.c["BUILD_SAMPLE_MATRICES"]) or any(e.get("build_matrices") for e in plan["entities"].values())
-        self.jar_identity = identity(Path(self.c["JUICER_TOOLS_JAR"]), True) if matrices and self.c["JUICER_TOOLS_JAR"] and truth(self.c["RUN_HIC"]) else {}
+        self.jar_identity = identity(Path(self.c["JUICER_TOOLS_JAR"]), True) if hic_targets(plan) and self.c["JUICER_TOOLS_JAR"] else {}
         scratch_root = Path(plan["roots"]["scratch"])
         scratch_root.mkdir(parents=True, exist_ok=True)
         self.scratch = Path(tempfile.mkdtemp(prefix="run_", dir=scratch_root))
@@ -313,7 +312,7 @@ def run_entity(rt, processor, matrices, key):
         try:
             processor.ensure_accepted(key)
             processor.stats(key)
-            build = entity.get("build_matrices") or entity["kind"] == "pool" or (entity["kind"] == "sample" and truth(rt.c["BUILD_SAMPLE_MATRICES"]))
+            build = builds_matrices(entity, rt.c)
             if build:
                 matrices.build(entity, processor.keys[key]["accepted"])
                 if not downstream(rt, entity, processor.keys[key]["accepted"]):
@@ -359,6 +358,10 @@ def cleanup(rt):
                 remove += labels
         if not truth(rt.c["KEEP_SINGLE_RES_COOL"]):
             remove += ["raw_cool"] + (["norm_cool"] if truth(rt.c["RUN_MCOOL"]) else [])
+        if not builds_hic(entity, rt.c):
+            # Changing output scope is not permission to remove old .hic products
+            # or their retained Juicer/raw inputs from earlier managed runs.
+            remove = [label for label in remove if label not in {"juicer", "raw_hic"}]
         for label in remove:
             store.remove_owned(Path(paths[label]))
     # A shared temp root is never recursively removed. Remove only empty directories
@@ -519,9 +522,9 @@ def manual_plan(c, args):
     if args.mode == "pool":
         entities[key]["provenance_units"] = sorted({unit for proof in proofs for unit in proof["dedup_units"]})
         entities[key]["import_sources"] = [source for proof in proofs for source in proof.get("import_sources", [])]
-    return {"schema_version": 1, "workflow_version": VERSION, "settings": c, "roots": roots,
+    return annotate_hic_outputs({"schema_version": 1, "workflow_version": VERSION, "settings": c, "roots": roots,
             "metadata_dir": str(Path(roots["out"]) / "run_metadata/manual_merges" / name), "references": {ref.reference_id: reference},
-            "samples": {}, "entities": entities, "dedup_units": units, "pools": {name: key} if args.mode != "joint-dedup" else {}, "warnings": [], "manual": True}
+            "samples": {}, "entities": entities, "dedup_units": units, "pools": {name: key} if args.mode != "joint-dedup" else {}, "warnings": [], "manual": True})
 
 
 def main():
@@ -548,7 +551,8 @@ def main():
         if args.command == "preflight":
             validate_existing_layout(plan)
             print(json.dumps({"workflow_mode": plan.get("workflow_mode", "merge"), "storage": storage_guard(plan).check(), "samples": len(plan["samples"]),
-                "dedup_units": plan["dedup_units"], "pools": plan["pools"], "tool_versions": tool_versions(plan)}, indent=2))
+                "dedup_units": plan["dedup_units"], "pools": plan["pools"],
+                "hic_output_scope": c["HIC_OUTPUT_SCOPE"], "hic_targets": hic_targets(plan), "tool_versions": tool_versions(plan)}, indent=2))
             log("Preflight successful; no analysis launched or output files adopted")
             return 0
         return execute(plan, args.config)

@@ -36,6 +36,7 @@ microc2tracks/
     12_integrated_hic_and_storage.md
     13_refilter_deduplicated_inputs.md
     14_shared_multiuser_installation.md
+    15_merged_hic_outputs.md
     README.md
   environment.yml
   envs/
@@ -78,6 +79,7 @@ microc2tracks/
   tests/
     check_bash_syntax.sh
     test_integration_features.py
+    test_hic_output_scope.py
     test_multireference.py
     test_real_tools.py
     test_reference_sentinel.sh

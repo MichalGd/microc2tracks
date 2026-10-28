@@ -1,5 +1,24 @@
 # Test Report
 
+## Merged-only .hic candidate 3.0.0-rc4: 2026-10-28
+
+- Full local suite: **67 discovered, 63 passed, four real-tool tests skipped**.
+- Six new tests check default/override/master-off policies, invalid scope rejection,
+  all requested technical/all-sample exports with no individual Juicer/export/link
+  work, unchanged per-row cooler/pairs, no-Java singleton runs and explicit report
+  skips, scope-change reuse/preservation, and failed merged normalization restart.
+- The synthetic addNorm-failure test deliberately exercises failure reporting;
+  its expected diagnostic is not a real scientific-tool failure.
+- Bash syntax, Python AST syntax, manifest completeness and Git whitespace checks
+  passed. No filtering, deduplication or cooler algorithms were changed.
+- The existing opt-in Linux tests now assert that individual/internal-dedup `.hic`
+  stages are absent by default; the final already-merged refilter fixture explicitly
+  selects `all`. Those four real-tool checks remain unexecuted here, not passed.
+
+The shared outside-home installation model and actual cross-account access gate
+remain in force. No server files/jobs/packages/indexes or production outputs were
+modified. See [the output-scope guide](docs/15_merged_hic_outputs.md).
+
 ## Shared-installation candidate 3.0.0-rc3: 2026-10-27
 
 - Full local suite: **61 discovered, 57 passed, four real-tool tests skipped**.

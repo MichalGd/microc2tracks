@@ -12,7 +12,7 @@ from pathlib import Path
 from reference_registry import Registry, RegistryError, read_sizes, validate_reference_files
 from refilter_inputs import read_sheet as read_refilter_sheet, validate_header
 from validate_samplesheet import validate_sheet
-from workflow_common import VERSION, absolute, identity, json_write, load_config, resolve_policy, safe_id, signature, truth
+from workflow_common import VERSION, absolute, annotate_hic_outputs, identity, json_write, load_config, resolve_policy, safe_id, signature, truth
 
 
 def resolve_roots(c: dict) -> dict:
@@ -186,10 +186,10 @@ def build_plan(c: dict, sheet: Path, *, check_files=True, mode: str | None = Non
         unit["members"].sort()
     if any(s["policy"]["profile"] == "legacy" for s in samples.values()):
         warnings.append("legacy Hi-C mode: no restriction-fragment filtering. Select restriction_hic with explicit enzymes to enable it.")
-    return {"schema_version": 1, "workflow_version": VERSION, "workflow_mode": mode, "roots": roots, "settings": c,
+    return annotate_hic_outputs({"schema_version": 1, "workflow_version": VERSION, "workflow_mode": mode, "roots": roots, "settings": c,
             "samplesheet": str(sheet.resolve()), "references": references, "samples": samples,
             "entities": entities, "dedup_units": units, "pools": pools, "warnings": warnings,
-            "dependencies": {key: ([f"sample:{s}:sorted" for s in e["members"]] if e["kind"] == "dedup" else e["units"] if e["kind"] == "pool" else []) for key, e in entities.items()}}
+            "dependencies": {key: ([f"sample:{s}:sorted" for s in e["members"]] if e["kind"] == "dedup" else e["units"] if e["kind"] == "pool" else []) for key, e in entities.items()}})
 
 
 def main():

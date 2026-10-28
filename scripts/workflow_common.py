@@ -15,7 +15,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-VERSION = "3.0.0-rc3"
+VERSION = "3.0.0-rc4"
 DEFAULTS = {
     "WORKFLOW_MODE": "fastq",
     "OUTDIR": "results", "TMPDIR": "", "PAIRS_OUTDIR": "", "MATRIX_OUTDIR": "",
@@ -39,7 +39,7 @@ DEFAULTS = {
     "MAX_PARALLEL_HIC": "1", "MAX_PARALLEL_MERGES": "1", "LOCK_POLL_SECONDS": "5",
     "BASE_RESOLUTION": "1000", "RESOLUTIONS": "1000,5000,10000,100000",
     "MCOOL_RESOLUTIONS": "", "HIC_RESOLUTIONS": "", "HIC_NORMALIZATIONS": "VC,VC_SQRT,KR,SCALE",
-    "RUN_FASTP": "true", "RUN_MCOOL": "true", "RUN_HIC": "true", "BUILD_SAMPLE_MATRICES": "true",
+    "RUN_FASTP": "true", "RUN_MCOOL": "true", "RUN_HIC": "true", "HIC_OUTPUT_SCOPE": "merged", "BUILD_SAMPLE_MATRICES": "true",
     "RUN_MERGE_TECHNICAL_REPLICATES": "true", "RUN_MERGE_ALL_SAMPLES": "false",
     "ALL_SAMPLES_MERGE_NAME": "all_samples_merged", "RUN_PRELIM_DOWNSTREAM": "true",
     "RUN_MULTIQC": "true", "RUN_GLOBAL_MULTIQC": "true", "RUN_FINAL_REPORT": "true",
@@ -61,6 +61,30 @@ def truth(value: object) -> bool:
     if str(value).lower() in {"false", "0", "no", ""}:
         return False
     raise ValueError(f"Expected true/false, got {value!r}")
+
+
+def builds_matrices(entity: dict, c: dict) -> bool:
+    return bool(entity.get("build_matrices")) or entity["kind"] == "pool" or (
+        entity["kind"] == "sample" and truth(c["BUILD_SAMPLE_MATRICES"]))
+
+
+def builds_hic(entity: dict, c: dict) -> bool:
+    """Output selection only: never change assay filtering or pair multiplicity."""
+    return truth(c["RUN_HIC"]) and builds_matrices(entity, c) and (
+        c.get("HIC_OUTPUT_SCOPE", "merged") == "all" or entity["kind"] in {"pool", "dedup"})
+
+
+def hic_targets(plan: dict) -> list[str]:
+    return [key for key, entity in plan["entities"].items() if builds_hic(entity, plan["settings"])]
+
+
+def annotate_hic_outputs(plan: dict) -> dict:
+    plan["hic_targets"] = hic_targets(plan)
+    if truth(plan["settings"]["RUN_HIC"]) and not plan["hic_targets"]:
+        plan["warnings"].append("No .hic outputs are requested by the matrix/scope settings. "
+            "HIC_OUTPUT_SCOPE=merged skips all individual rows, including singletons and refilter inputs; "
+            "choose all to generate individual .hic files, or enable intentional output merging.")
+    return plan
 
 
 def safe_id(value: str) -> str:
@@ -111,6 +135,8 @@ def validate_config(c: dict[str, str]) -> None:
         raise ValueError("WORKFLOW_MODE must be fastq/refilter-deduplicated")
     if not c["OUTDIR"].strip():
         raise ValueError("OUTDIR must not be empty")
+    if c["HIC_OUTPUT_SCOPE"] not in {"merged", "all"}:
+        raise ValueError("HIC_OUTPUT_SCOPE must be merged/all")
     for key in c:
         if key.startswith(("RUN_", "KEEP_", "BUILD_", "CHECK_", "CLEAN_", "FILTER_", "HIC_REMOVE_")):
             truth(c[key])

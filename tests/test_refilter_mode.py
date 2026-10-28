@@ -34,7 +34,7 @@ class RefilterModeTests(unittest.TestCase):
         self.addCleanup(self.fixture.tearDown)
         self.root = self.fixture.root
         self.c = {**self.fixture.c, "HIC_MIN_CIS_DIST": "10", "RUN_MULTIQC": "false", "RUN_GLOBAL_MULTIQC": "false",
-                  "RUN_FASTP": "true", "KEEP_DEDUP_PAIRS": "false", "KEEP_SORTED_PAIRS": "false", "KEEP_TRIMMED_FASTQ": "false"}
+                  "RUN_FASTP": "true", "HIC_OUTPUT_SCOPE": "all", "KEEP_DEDUP_PAIRS": "false", "KEEP_SORTED_PAIRS": "false", "KEEP_TRIMMED_FASTQ": "false"}
         self.jar = self.root / "fake.jar"
         self.jar.write_bytes(b"mock fixture; not a real JAR")
         self.c["JUICER_TOOLS_JAR"] = str(self.jar)

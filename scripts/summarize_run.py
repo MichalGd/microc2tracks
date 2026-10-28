@@ -445,6 +445,7 @@ def main() -> None:
 def write_plan_summary(plan: dict, outdir: Path) -> None:
     """New runs use only declared physical paths; legacy report APIs stay available."""
     import shutil
+    from workflow_common import builds_hic
     outdir.mkdir(parents=True, exist_ok=True)
     sample_rows, group_rows, file_rows, qc_rows = [], [], [], []
     for key, entity in plan["entities"].items():
@@ -456,6 +457,8 @@ def write_plan_summary(plan: dict, outdir: Path) -> None:
         qc = json.loads(qc_path.read_text()) if qc_path.exists() else {}
         dedup = parse_pairtools_stats(Path(paths["dedup_stats"]))
         policy = entity["policy"]
+        hic_requested = builds_hic(entity, plan["settings"])
+        hic_exists = Path(paths["norm_hic"]).is_file()
         row = {"entity": key, "kind": entity["kind"], "sample": entity["name"], "reference_id": entity["reference_id"],
                "workflow_mode": plan.get("workflow_mode", "merge"), "input_stage": entity.get("input_stage", "fastq"),
                "deduplicated_input": plan["samples"].get(entity["name"], {}).get("deduplicated_pairs", ""),
@@ -466,7 +469,11 @@ def write_plan_summary(plan: dict, outdir: Path) -> None:
                "dedup_total": dedup.get("total", ""), "dedup_total_nodups": dedup.get("total_nodups", ""),
                "dedup_total_dups": dedup.get("total_dups", ""), "valid_pairs_total": as_text(qc.get("exclusive_counts", {}).get("accepted")),
                "valid_pairs_cis": as_text(qc.get("accepted_cis")), "valid_pairs_trans": as_text(qc.get("accepted_trans")),
-               "valid_pairs_path": paths["accepted"], "norm_mcool_path": paths["norm_mcool"], "norm_hic_path": paths["norm_hic"]}
+               "valid_pairs_path": paths["accepted"], "norm_mcool_path": paths["norm_mcool"],
+               "hic_output_scope": plan["settings"].get("HIC_OUTPUT_SCOPE", "merged"), "hic_requested": str(hic_requested).lower(),
+               "hic_output_status": ("present" if hic_requested else "existing_preserved_not_requested") if hic_exists else
+                   ("pending_or_failed" if hic_requested else "not_requested"),
+               "norm_hic_path": paths["norm_hic"] if hic_requested or hic_exists else ""}
         (sample_rows if entity["kind"] == "sample" else group_rows).append(row)
         for category, count in qc.get("exclusive_counts", {}).items():
             qc_rows.append({"entity": key, "count_type": "exclusive", "category": category, "count": str(count)})

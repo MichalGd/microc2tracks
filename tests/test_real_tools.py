@@ -93,6 +93,10 @@ class RealTools(unittest.TestCase):
             result = subprocess.run([sys.executable, str(ROOT / "scripts/pipeline.py"), "run", "-c", str(config), "-s", str(sheet)], stdout=out, stderr=subprocess.STDOUT)
         self.assertEqual(result.returncode, 0, run_log.read_text())
         plan = json.loads((work / "out/run_metadata/run_plan.json").read_text())
+        for entity in plan["entities"].values():
+            if entity["kind"] in {"sample", "dedup"}:
+                self.assertFalse(Path(entity["paths"]["norm_hic"]).exists())
+                self.assertFalse((Path(entity["paths"]["done"]) / "juicer.json").exists())
         pool = plan["entities"]["pool:all_samples_merged"]
         paths = pool["paths"]
         qc = json.loads(Path(paths["filter_qc"]).read_text())
@@ -139,7 +143,8 @@ class RealTools(unittest.TestCase):
                                  "deduplicated_pairs": str(source), "input_members": "part1;part2"})
             imported_values = {**values, "WORKFLOW_MODE": "refilter-deduplicated", "OUTDIR": str(work / "refilter_out"),
                 "PAIRS_OUTDIR": str(work / "refilter_pairs"), "MATRIX_OUTDIR": str(work / "refilter_matrices"),
-                "TRIMMED_OUTDIR": "", "RUN_MERGE_ALL_SAMPLES": "false", "RUN_FASTP": "true", "HIC_MIN_CIS_DIST": "5000"}
+                "TRIMMED_OUTDIR": "", "RUN_MERGE_ALL_SAMPLES": "false", "RUN_FASTP": "true", "HIC_MIN_CIS_DIST": "5000",
+                "HIC_OUTPUT_SCOPE": "all"}  # explicit export of this already-merged imported row
             refilter_config = work / "refilter.conf"
             refilter_config.write_text("".join(f"{key}={shlex.quote(str(value))}\n" for key,value in imported_values.items()))
             with run_log.open("a") as out:

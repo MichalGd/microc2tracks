@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased - 3.0.0-rc4 (2026-10-28)
+
+- Added `HIC_OUTPUT_SCOPE="merged"` as the default for both assays: no individual
+  technical-row Juicer exports, `.hic` generation/normalization or public tracks;
+  requested technical/all-sample pools still get `.hic` after their merges.
+- Scope `all` restores individual exports; `RUN_HIC=false` remains the master
+  off switch. Unpooled singleton/imported rows are intentionally skipped under
+  `merged`, with no automatic extra pooling. Explicit standalone merged matrix
+  requests remain supported; internal dedup groups do not acquire extra matrices.
+- Left contact filtering/deduplication and cooler processing unchanged. Java/JAR
+  are required only for actual targets, which preflight now lists explicitly.
+- Reports distinguish intentional skips, requested outputs and preserved older
+  files. Scope changes reuse completed pair/cooler stages within this release
+  and do not remove previously generated `.hic` or retained Juicer/raw products.
+- Added six focused mocked regressions, including merged export/publication,
+  no-target dependency checks, scope-change reuse and failed-normalization resume.
+  Extended the unexecuted tiny real-tool suite's merged-only assertions.
+- Updated the shared installation guide to stage RC4 outside home directories;
+  existing server code/jobs/environments/references are not modified.
+
 ## Unreleased - 3.0.0-rc3 (2026-10-27)
 
 - Added a shared Linux launcher for a read-only versioned installation outside

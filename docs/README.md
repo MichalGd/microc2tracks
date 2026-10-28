@@ -30,3 +30,4 @@ flowchart TD
 | `12_integrated_hic_and_storage.md` | Integrated restriction Hi-C, joint deduplication, pooling, optional disks, restart and minimum tests. |
 | `13_refilter_deduplicated_inputs.md` | Refilter existing deduplicated pairs without alignment or another dedup pass; input schema, provenance, preservation and examples. |
 | `14_shared_multiuser_installation.md` | Versioned installation outside home directories, existing-environment launcher, unprivileged access checks, per-user outputs and safe staging. |
+| `15_merged_hic_outputs.md` | Default merged-only .hic generation, optional individual exports, singleton/refilter behavior and restart/reporting safeguards. |

@@ -33,6 +33,7 @@ docs/11_server_baseline_sync.md
 docs/12_integrated_hic_and_storage.md
 docs/13_refilter_deduplicated_inputs.md
 docs/14_shared_multiuser_installation.md
+docs/15_merged_hic_outputs.md
 docs/README.md
 environment.yml
 envs/downstream_optional.yml
@@ -71,6 +72,7 @@ scripts/validate_samplesheet.py
 scripts/workflow_common.py
 tests/check_bash_syntax.sh
 tests/test_integration_features.py
+tests/test_hic_output_scope.py
 tests/test_multireference.py
 tests/test_real_tools.py
 tests/test_reference_sentinel.sh

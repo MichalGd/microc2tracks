@@ -1,4 +1,4 @@
-# Shared, versioned Linux installation (3.0.0-rc3)
+# Shared, versioned Linux installation (3.0.0-rc4)
 
 Install code outside every user's home. All ordinary local accounts must be able
 to read code/references and execute tools; only administrators/maintainers may
@@ -8,8 +8,8 @@ the software available does **not** make private sample data readable to others.
 ## Layout and unchanged running work
 
 ```text
-/opt/microc2tracks/versions/3.0.0-rc3/       root-owned release, dirs 0755/files 0644
-/usr/local/bin/microc2tracks-rc3            symlink to that release's shared_launcher.sh
+/opt/microc2tracks/versions/3.0.0-rc4/       root-owned release, dirs 0755/files 0644
+/usr/local/bin/microc2tracks-rc4            symlink to that release's shared_launcher.sh
 /etc/microc2tracks/launcher.conf            optional root-owned site config, 0644
 /opt/conda/envs/microc2tracks/               EXISTING environment, not copied/updated
 existing reference/index/JAR paths          reused read-only, no genome reindexing
@@ -30,7 +30,7 @@ Nothing here launches a production run, changes packages or copies genome indexe
 
 ## Administrator staging: verified archive only
 
-Upload the RC3 archive and checksum, e.g. to the submitting user's existing
+Upload the RC4 archive and checksum, e.g. to the submitting user's existing
 `/home/micgdu/Analysis/workflows/incoming`. This is only a temporary transfer
 location, not the installation. The following example uses that upload location;
 other installations can use any administrator-accessible upload directory.
@@ -39,9 +39,9 @@ other installations can use any administrator-accessible upload directory.
 (
 set -e
 UPLOAD=/home/micgdu/Analysis/workflows/incoming
-RELEASE=/opt/microc2tracks/versions/3.0.0-rc3
+RELEASE=/opt/microc2tracks/versions/3.0.0-rc4
 cd "$UPLOAD"
-sha256sum -c microc2tracks_3.0.0-rc3_20261027.sha256
+sha256sum -c microc2tracks_3.0.0-rc4_20261028.sha256
 
 if sudo test -e "$RELEASE" || sudo test -L "$RELEASE"; then
     printf 'STOP: release path already exists: %s\n' "$RELEASE"
@@ -49,7 +49,7 @@ if sudo test -e "$RELEASE" || sudo test -L "$RELEASE"; then
 fi
 sudo install -d -o root -g root -m 0755 /opt/microc2tracks/versions
 sudo mkdir -- "$RELEASE"
-sudo tar --no-same-owner -xzf microc2tracks_3.0.0-rc3_20261027.tar.gz \
+sudo tar --no-same-owner -xzf microc2tracks_3.0.0-rc4_20261028.tar.gz \
     --strip-components=1 -C "$RELEASE"
 
 # These permissions apply ONLY to the newly extracted release, not old software.
@@ -59,7 +59,7 @@ sudo find "$RELEASE" -type f -exec chmod 0644 {} +
 sudo find "$RELEASE/scripts" "$RELEASE/examples" -type f -name '*.sh' -exec chmod 0755 {} +
 
 # No -f: refuse to replace an existing command/symlink.
-sudo ln -s -- "$RELEASE/scripts/shared_launcher.sh" /usr/local/bin/microc2tracks-rc3
+sudo ln -s -- "$RELEASE/scripts/shared_launcher.sh" /usr/local/bin/microc2tracks-rc4
 )
 ```
 
@@ -84,10 +84,10 @@ its target/ancestors. An environment in `/opt` can still contain symlinks into a
 private home, so the pathname alone does not prove all-user availability.
 
 ```bash
-/usr/local/bin/microc2tracks-rc3 --version
-/usr/local/bin/microc2tracks-rc3 check-access
-sudo -u nobody -- /usr/local/bin/microc2tracks-rc3 --version
-sudo -u nobody -- /usr/local/bin/microc2tracks-rc3 check-access
+/usr/local/bin/microc2tracks-rc4 --version
+/usr/local/bin/microc2tracks-rc4 check-access
+sudo -u nobody -- /usr/local/bin/microc2tracks-rc4 --version
+sudo -u nobody -- /usr/local/bin/microc2tracks-rc4 check-access
 ```
 
 The `nobody` checks exercise an unrelated, unprivileged identity without starting
@@ -122,8 +122,8 @@ and edit those copies. In the user's config set absolute existing reference/JAR
 paths, a new unique `OUTDIR`, and optional alternative roots. For example:
 
 ```bash
-microc2tracks-rc3 preflight -c config.conf -s samplesheet.csv
-microc2tracks-rc3 run -c config.conf -s samplesheet.csv
+microc2tracks-rc4 preflight -c config.conf -s samplesheet.csv
+microc2tracks-rc4 run -c config.conf -s samplesheet.csv
 ```
 
 Refiltering uses the same command with `--mode refilter-deduplicated` and its

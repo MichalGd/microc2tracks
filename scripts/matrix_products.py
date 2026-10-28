@@ -6,7 +6,7 @@ import json
 import shutil
 from pathlib import Path
 
-from workflow_common import json_write, text_open, truth
+from workflow_common import builds_hic, json_write, text_open, truth
 
 
 def export_juicer(source: Path, destination: Path) -> int:
@@ -94,7 +94,7 @@ class MatrixProducts:
                     rt.command(["cooler", "balance", "-p", c["THREADS_MATRIX"], "-f", str(t["data"])], rt.log(entity, "balance"))
                 matrix_stage("norm_cool", key, balanced)
 
-        if truth(c["RUN_HIC"]):
+        if builds_hic(entity, c):
             hic_args = {**common, "resolutions": c["HIC_RESOLUTIONS"], "jar": rt.jar_identity}
             norm_key = rt.key("norm_hic", {**hic_args, "normalizations": c["HIC_NORMALIZATIONS"]}, ["java"], ["matrix_products.py"])
             final = Path(paths["norm_hic"])

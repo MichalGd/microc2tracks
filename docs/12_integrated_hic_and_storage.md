@@ -1,4 +1,4 @@
-# Integrated Hi-C, joint deduplication and optional storage roots (3.0.0-rc3)
+# Integrated Hi-C, joint deduplication and optional storage roots (3.0.0-rc4)
 
 This is one update to **microc2tracks**, not a second Hi-C pipeline. The existing
 commands remain:
@@ -65,6 +65,10 @@ HIC_REMOVE_ADJACENT_INWARD="false"
 Micro-C rows leave the Hi-C columns blank. `assay=hic` selects assay processing;
 `RUN_HIC` controls **.hic file generation for either assay**. These are different
 settings. CSV is the supported sample-sheet format; export Excel workbooks first.
+`HIC_OUTPUT_SCOPE="merged"` now limits `.hic` generation to requested merged
+outputs; individual `.cool`/`.mcool` remain unchanged. `all` restores individual
+exports. See [the output-scope guide](15_merged_hic_outputs.md) for singletons,
+refilter inputs, preflight target lists and restart behavior.
 CRLF CSV and empty optional fields are parsed structurally, not by Bash `read`.
 Configs are trusted Bash code; sample metadata is never evaluated as shell code.
 

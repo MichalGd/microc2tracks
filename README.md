@@ -4,7 +4,7 @@
 
 The first implementation follows the style of the existing Shell repositories `fastq2tracks` and `rnaseq2tracksP`: a top-level runner, `config/`, `docs/`, `examples/`, `scripts/`, `environment.yml`, and simple tests.
 
-Version **3.0.0-rc3** implements integrated restriction Hi-C, user-selected joint
+Version **3.0.0-rc4** implements integrated restriction Hi-C, user-selected joint
 deduplication, disjoint pooling and optional output disks. Read the
 [integration/storage guide](docs/12_integrated_hic_and_storage.md) before upgrading.
 It preserves the [earlier server fixes](docs/11_server_baseline_sync.md).
@@ -23,6 +23,12 @@ initialization. Configs, outputs, scratch and writable caches belong to each
 user/project, not the shared installation. Verify actual shared resources from
 another account before claiming server-wide access.
 
+By default `.hic` files are now built **only for merged outputs**, not individual
+technical rows: `RUN_HIC="true"`, `HIC_OUTPUT_SCOPE="merged"`. Individual pairs,
+QC and cooler matrices remain available. Set scope `all` for individual exports;
+see [merged-only .hic output](docs/15_merged_hic_outputs.md), including singletons
+and already-merged refilter inputs.
+
 ## Workflow Schematic
 
 ```mermaid
@@ -37,7 +43,7 @@ flowchart LR
   E -->|"Hi-C"| G["MAPQ + optional cis filter<br/>profile-specific restriction classification"]
   F --> H["indexed valid .pairs.gz"]
   G --> H
-  H --> I["per-row matrices<br/>.cool + .mcool + .hic"]
+  H --> I["per-row matrices<br/>.cool + .mcool"]
   D --> U["User-selected dedup_group<br/>merge originals, dedup once"]
   U --> V["Same shared assay filtering"]
   V --> W["Accepted joint-unit pairs"]
@@ -64,7 +70,7 @@ For each sample-sheet row, interpreted as one technical replicate:
 - MAPQ-filtered valid `.pairs.gz`
 - raw and balanced `.cool` intermediates if configured
 - final balanced `.mcool`
-- final normalized `.hic`
+- final normalized `.hic` only if individual exports are explicitly enabled
 - pairtools stats and MultiQC report
 
 When multiple rows share the same `assay`, `condition`, `biological_replicate`, and canonical reference, the workflow also merges those technical replicates after per-row processing and rebuilds merged `.pairs.gz`, `.cool`, `.mcool`, and `.hic` files. Cross-reference merges are rejected. Samples without technical replicates should use `technical_replicate=1`; no redundant merged output is created for a one-row technical replicate group.
@@ -103,7 +109,7 @@ Optional heavier downstream scripts can generate:
 | Biological pooling | Optional all-sample aggregate of disjoint units, without global dedup | explicitly named pooled matrices | implemented in candidate |
 | Multi-disk storage | Optional pairs/matrix/trim/cache roots; SSD scratch; HDD final output | resolved paths and verified transfers | implemented in candidate |
 | Matrix generation | Raw and balanced single-resolution and multiresolution matrices | `.cool`, `.mcool` | implemented |
-| `.hic` export | Juicer-compatible `.hic` generation and normalization | `.raw.hic`, `.norm.hic` | implemented |
+| `.hic` export | Juicer-compatible generation/normalization; merged outputs by default, optional individual exports | `.raw.hic`, `.norm.hic` | implemented |
 | Technical replicate merging | Merge filtered pair files within assay/condition/biological replicate groups and rebuild matrices | merged `.pairs.gz`, `.mcool`, `.hic` | implemented |
 | Final run reporting | Summarize samples, merged groups, important files, and global QC | TSV, HTML, global MultiQC | implemented |
 | Storage cleanup | Optional cleanup of large reproducible intermediates | smaller run directories | implemented |

@@ -1,4 +1,4 @@
-# Server Deployment Notes: 3.0.0-rc3
+# Server Deployment Notes: 3.0.0-rc4
 
 This is a complete feature candidate, prepared for staged validation. No server
 installation or running analysis was changed. The real-tool release gate in
@@ -8,7 +8,7 @@ installation or running analysis was changed. The real-tool release gate in
 
 1. Keep the active installation and its environment untouched.
 2. Follow [the shared multi-user installation guide](docs/14_shared_multiuser_installation.md):
-   extract into a new root-owned release under `/opt/microc2tracks/versions/3.0.0-rc3`,
+   extract into a new root-owned release under `/opt/microc2tracks/versions/3.0.0-rc4`,
    not a user's home. Add only a version-specific command first; do not replace
    an existing default launcher while jobs may use it.
    Deploy the entire set in UPLOAD_MANIFEST.txt, not selected shell scripts.
@@ -27,6 +27,10 @@ installation or running analysis was changed. The real-tool release gate in
 5. Configure the references actually used, actual library chemistry/enzymes,
    intentional dedup groups, resource limits and output/storage roots. Examples
    are not server-specific deployment instructions.
+   `.hic` output now defaults to `HIC_OUTPUT_SCOPE="merged"`: only requested
+   technical/all-sample merged outputs, not individual rows. Singletons and lone
+   already-merged refilter inputs need scope `all` if their `.hic` is wanted.
+   [See the output-scope guide](docs/15_merged_hic_outputs.md).
 6. Run preflight against a reviewed CSV/config and a new OUTDIR. No automatic
    adoption or deletion of old sample outputs is performed.
 7. Switch a launcher/symlink only after the real-tool gate and review succeed.

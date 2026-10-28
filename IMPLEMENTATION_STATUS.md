@@ -1,6 +1,6 @@
-# Integrated update handoff: 3.0.0-rc3
+# Integrated update handoff: 3.0.0-rc4
 
-Prepared: 2026-10-27. Base: `0ce6761` (published server-source synchronization).
+Prepared: 2026-10-28. Base: `0ce6761` (published server-source synchronization).
 Local branch: `feature/integrated-hic-storage-20261027`.
 
 ## Implemented together
@@ -21,10 +21,13 @@ Local branch: `feature/integrated-hic-storage-20261027`.
 - Read-only shared installation outside user homes, a version-resolving launcher
   using the existing environment without conda activation, and explicit
   current-account access checks. See [the multi-user guide](docs/14_shared_multiuser_installation.md).
+- Merged-only `.hic` generation by default, retaining individual cooler matrices;
+  explicit all-output override, conditional Java/JAR requirements, exact preflight
+  targets and report/restart safeguards. See [the scope guide](docs/15_merged_hic_outputs.md).
 
 ## Verification and release gate
 
-57 local tests passed; four opt-in real-tool tests were skipped. Python
+63 local tests passed; four opt-in real-tool tests were skipped. Python
 compilation, Bash syntax/sentinel checks, shell help routes, example CSV validation,
 browser help and Git whitespace checks passed. The runner contract includes
 mocked external commands, not proof of real BWA/pairtools/cooler/Java behavior.

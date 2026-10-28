@@ -21,6 +21,13 @@ even if their ordinary config switches are enabled. Neither FASTQs nor a BWA
 index/tool are required. Pairtools is used for sorting/statistics, **not dedup**.
 The same pinned environment, shared filtering and matrix builders are used.
 
+Since RC4 the default `HIC_OUTPUT_SCOPE="merged"` skips individual-row `.hic`,
+including imported rows that already represent a merged library. To regenerate
+`.hic` for such a final input, explicitly select `HIC_OUTPUT_SCOPE="all"`.
+Requested new technical/all-sample pools get `.hic` under the default scope.
+Other matrix formats and the no-alignment/no-dedup guarantees are unchanged; see
+[the output-scope guide](15_merged_hic_outputs.md).
+
 ## Input CSV
 
 Required columns:
