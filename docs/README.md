@@ -31,3 +31,4 @@ flowchart TD
 | `13_refilter_deduplicated_inputs.md` | Refilter existing deduplicated pairs without alignment or another dedup pass; input schema, provenance, preservation and examples. |
 | `14_shared_multiuser_installation.md` | Versioned installation outside home directories, existing-environment launcher, unprivileged access checks, per-user outputs and safe staging. |
 | `15_merged_hic_outputs.md` | Default merged-only .hic generation, optional individual exports, singleton/refilter behavior and restart/reporting safeguards. |
+| `16_default_promotion.md` | Promote the validated installation to standard commands with backups, idle-job checks, explicit versioning and rollback guidance. |

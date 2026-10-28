@@ -37,6 +37,7 @@ microc2tracks/
     13_refilter_deduplicated_inputs.md
     14_shared_multiuser_installation.md
     15_merged_hic_outputs.md
+    16_default_promotion.md
     README.md
   environment.yml
   envs/

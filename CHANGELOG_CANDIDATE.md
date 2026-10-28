@@ -1,6 +1,18 @@
 # Changelog
 
-## Unreleased - 3.0.0-rc4 (2026-10-28)
+## 3.0.0-rc4 - validated default (2026-10-28)
+
+- Published the integrated workflow as the repository default, retaining the
+  exact runtime already installed/tested as RC4 rather than renumbering it.
+- Recorded user-supplied biolserv validation: 63 regressions plus all four tiny
+  real-tool tests passed. Documented actual environment versions, fixture-header
+  and Java warnings, and the limits of toy-data validation.
+- Added reversible administrator instructions to promote the existing shared
+  installation to standard commands while preserving old launchers, code,
+  environments, indexes and outputs. GitHub publishing does not execute that
+  server-side switch or launch an analysis.
+
+### Integrated changes
 
 - Added `HIC_OUTPUT_SCOPE="merged"` as the default for both assays: no individual
   technical-row Juicer exports, `.hic` generation/normalization or public tracks;

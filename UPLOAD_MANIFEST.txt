@@ -34,6 +34,7 @@ docs/12_integrated_hic_and_storage.md
 docs/13_refilter_deduplicated_inputs.md
 docs/14_shared_multiuser_installation.md
 docs/15_merged_hic_outputs.md
+docs/16_default_promotion.md
 docs/README.md
 environment.yml
 envs/downstream_optional.yml

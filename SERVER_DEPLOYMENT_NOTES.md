@@ -1,8 +1,11 @@
 # Server Deployment Notes: 3.0.0-rc4
 
-This is a complete feature candidate, prepared for staged validation. No server
-installation or running analysis was changed. The real-tool release gate in
-[TEST_REPORT.md](TEST_REPORT.md) remains outstanding.
+RC4 passed the user-reported Linux validation on 2026-10-28: 63 regressions and
+all four tiny scientific tests succeeded using the existing environment.
+See [TEST_REPORT.md](TEST_REPORT.md) for scope and limits. If RC4 is already
+installed, use [default promotion](docs/16_default_promotion.md); no reinstallation,
+package update or index duplication is needed. A GitHub update does not switch
+the server's launchers automatically. The steps below cover staging on a new site.
 
 ## Safe staging
 

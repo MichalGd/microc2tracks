@@ -1,5 +1,63 @@
 # Test Report
 
+## Linux server validation and default promotion: 2026-10-28
+
+Evidence: user-supplied terminal output from `biolserv`, not direct remote
+execution by the preparation agent. Tested runtime: `3.0.0-rc4`, commit
+`22d10efa98a36234ab798db9096a071aff9a7c4b`, archive SHA-256
+`de0f83a045457189d2f3581e6593ed518c670f139e9ba850342eb31b4e7f66c4`.
+The following documentation-only promotion does not change that runtime.
+
+- The server regression run discovered 67 tests: **63 passed, four opt-in tests
+  skipped**, in 2.110 seconds. The separate opt-in run then completed **all four
+  real-tool tests successfully** in 167.086 seconds. All 67 distinct checks have
+  therefore passed on that server; skipped tests are not being counted as passes.
+- Both maintainer and unrelated unprivileged (`nobody`, euid 65534) version routes
+  worked. Code, shared executables, scientific imports, actual reference/index
+  paths and the configured Juicer JAR were accessible in the checks provided.
+  The configured reference-size table matched its existing `.fai` names/lengths.
+- The scientific fixtures exercise Micro-C, generic restriction Hi-C, the original
+  DpnII Dovetail profile, one joint dedup pass, independent-library retention and
+  chunk-boundary behavior, merged-only `.hic`, split output roots, restart, and
+  refiltering an existing jointly deduplicated stream without mapping/deduplication.
+  Raw `.mcool` and `.hic` bin counts matched on those fixtures.
+- No additional environment, package installations or production genome indexes
+  were needed. Tests created their own tiny synthetic reference/index and temporary
+  outputs, not production analyses.
+
+Reported shared environment: Python 3.12.13, pairtools 1.1.3, cooler 0.10.4,
+cooltools 0.7.1, bwa-mem2 2.3, pairix 0.3.9, htslib 1.23.1, numpy 1.26.4,
+scipy 1.17.1, pandas 3.0.3, bioframe 0.8.0, h5py 3.16.0, OpenJDK 25.0.2 and
+Juicer Tools 2.18.00. This is the observed working server environment, not a
+claim that the fresh-install target in `environment.yml` was solved or tested.
+
+### Warnings and limits
+
+The bridge fixture is written in coordinate order but lacks a `#sorted` header.
+Pairtools 1.1.3 emits the displayed sorting warning on a missing header marker;
+it is not a detected record-order violation. See the
+[upstream condition](https://github.com/open2c/pairtools/blob/v1.1.3/pairtools/cli/dedup.py#L464-L468).
+The normal pipeline explicitly sorts before deduplication. The test also pins
+pairtools' representative-only carryover: chunk-sensitive fuzzy clusters are
+not claimed to have exact global transitive closure.
+
+Java reflection/development-mode warnings were nonfatal in these tests; they
+do not establish a measured performance penalty. The earlier intentional
+synthetic addNorm failure was a regression test, not a production error.
+
+The toy scientific runs disable fastp, preliminary downstream analyses and
+MultiQC, use 1 kb matrices and VC normalization, and do not benchmark large
+production runs or validate every enzyme/protocol/normalization combination.
+The unit suite covers additional filtering/configuration contracts. No real
+production library chemistry or dedup history is established by toy tests.
+Project-specific configuration/preflight is still required, as is site access
+review where another real login account has different ACL/group policies.
+
+The software-validation gate has passed for this environment. The server's
+default-launcher switch is a separate administrator action described in
+[the promotion guide](docs/16_default_promotion.md); a GitHub push does not perform it.
+The earlier sections below retain the historical preparation-stage results.
+
 ## Merged-only .hic candidate 3.0.0-rc4: 2026-10-28
 
 - Full local suite: **67 discovered, 63 passed, four real-tool tests skipped**.

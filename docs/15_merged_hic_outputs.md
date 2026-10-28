@@ -69,5 +69,6 @@ outputs; restart can reuse successful pairs/cooler/raw-HIC stages.
 
 The shared outside-home installation model remains unchanged. RC4 is staged as
 a new version, never by overwriting code, settings or jobs currently running.
-The tiny real-tool Linux release tests still need to be run before production
-promotion; local mocked output tests do not replace them.
+The user-supplied 2026-10-28 Linux results subsequently passed all four tiny
+real-tool tests. Their scope and limits are recorded in TEST_REPORT.md; local
+mocked output tests alone would not have established that result.

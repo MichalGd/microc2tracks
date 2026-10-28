@@ -8,8 +8,13 @@ Version **3.0.0-rc4** implements integrated restriction Hi-C, user-selected join
 deduplication, disjoint pooling and optional output disks. Read the
 [integration/storage guide](docs/12_integrated_hic_and_storage.md) before upgrading.
 It preserves the [earlier server fixes](docs/11_server_baseline_sync.md).
-This candidate still requires the tiny real-tool Linux smoke tests before
-production promotion; see [the test report](TEST_REPORT.md).
+On 2026-10-28, user-supplied Linux server logs confirmed 63 regression tests and
+all four tiny real-tool tests passed using the existing environment. See
+[the test report](TEST_REPORT.md) for the tested scope and limitations, and
+[default-command promotion](docs/16_default_promotion.md) to make this installed
+version the shared `microc2tracks` command. The `rc4` identifier is retained to
+match the exact runtime tested; new datasets still need reviewed configuration
+and preflight.
 
 Existing mapped, deduplicated `.pairs`/`.pairs.gz` can be reprocessed with
 `--mode refilter-deduplicated`, skipping alignment and deduplication. See the

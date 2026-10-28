@@ -1,7 +1,8 @@
-# Integrated update handoff: 3.0.0-rc4
+# Integrated workflow status: 3.0.0-rc4
 
 Prepared: 2026-10-28. Base: `0ce6761` (published server-source synchronization).
-Local branch: `feature/integrated-hic-storage-20261027`.
+Runtime baseline: `22d10efa98a36234ab798db9096a071aff9a7c4b`.
+The published default retains the exact RC4 runtime tested on the server.
 
 ## Implemented together
 
@@ -25,29 +26,32 @@ Local branch: `feature/integrated-hic-storage-20261027`.
   explicit all-output override, conditional Java/JAR requirements, exact preflight
   targets and report/restart safeguards. See [the scope guide](docs/15_merged_hic_outputs.md).
 
-## Verification and release gate
+## Verification and default promotion
 
-63 local tests passed; four opt-in real-tool tests were skipped. Python
-compilation, Bash syntax/sentinel checks, shell help routes, example CSV validation,
-browser help and Git whitespace checks passed. The runner contract includes
-mocked external commands, not proof of real BWA/pairtools/cooler/Java behavior.
+Preparation checks passed locally, and the user subsequently supplied Linux
+server results: 63 regressions passed, followed by all four opt-in real-tool
+checks (167.086 seconds). The exact scope, working environment, warnings and
+limitations are recorded in [TEST_REPORT.md](TEST_REPORT.md). Unlike the earlier
+mocked-only status, these results include real BWA/pairtools/cooler/Java runs.
 
-Before promotion, validate the existing shared Linux environment and run the four
-tiny real-tool tests documented in [TEST_REPORT.md](TEST_REPORT.md). This checks
-FASTQ-to-matrix behavior and raw `.mcool`/`.hic` equality without production data
-or extensive benchmarking. Local Docker's Linux engine was unavailable, so those
-checks could not be truthfully marked passed here.
+The server software-validation gate has passed using the existing environment.
+No duplicate software installation or production reindexing was required. These
+small tests are not exhaustive production validation: actual chemistry, dedup
+scope, reference policy, resource limits and a new output tree still need project
+configuration/preflight. The fresh-install target environment has not been solved
+here and is not an instruction to replace the working server environment.
 
-No server deployment, running-job changes, production-output deletion, or
-production-data reruns were performed. GitHub main was not changed by preparing
-this candidate. Original planning documents and prior baseline directories were
-preserved. Do not overwrite the active server installation with an unvalidated
-candidate.
+The user installed RC4 outside the home directory and tested it from maintainer
+and unrelated unprivileged identities. The preparation agent did not remotely
+deploy or run tests itself. No production-output deletion or production rerun
+was performed. Original planning documents and archived candidates are preserved.
 
-The shared launcher and access utility were checked locally, not on biolserv.
-Other-account access to the existing environment, references, indexes and JAR
-remains an explicit server deployment gate. Only the new release gets new
-ownership/permissions; no recursive changes to active resources are prescribed.
+The user has confirmed workflow jobs are idle and requested default promotion.
+Follow [the promotion guide](docs/16_default_promotion.md) to back up existing
+launchers and switch the three standard commands. The GitHub update is separate
+from this server action. Keep the versioned launcher, old code and environment;
+do not recursively change existing resource permissions. Other real login
+accounts may still need checks where site ACLs differ.
 
 See [the user guide](docs/12_integrated_hic_and_storage.md),
 [configuration template](config/config_template.conf), and

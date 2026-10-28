@@ -146,6 +146,12 @@ capacity or protect the system disk; configure actual data mounts/reserves.
 
 ## Minimum validation and promotion
 
+The user-supplied 2026-10-28 server logs now record successful access checks and
+all 67 distinct tests passing for installed RC4. The instructions below remain
+the requirements for another site/environment, not a request to repeat them on
+the already-tested installation. To make the existing installation the default
+now that jobs are idle, use [the backed-up launcher promotion](16_default_promotion.md).
+
 Reuse the current environment without changing packages if imports and tiny
 functional tests pass. The proposed `environment.yml` is a fresh-install target,
 not an instruction to replace this server's active environment. Defer tests if
@@ -160,4 +166,5 @@ If a default launcher already exists, inspect it and agree a safe promotion time
 do not overwrite it during an active run. Optional aliases
 `microc2tracks-preflight`/`microc2tracks-merge` may point to the same launcher.
 Retain version-specific commands and old installations for reproducibility and
-rollback. No server-side validation is claimed by preparing this package.
+rollback. Preparing a package alone does not validate a server; the later
+user-supplied results and their limits are recorded in TEST_REPORT.md.
