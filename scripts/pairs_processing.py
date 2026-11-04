@@ -34,6 +34,10 @@ class PairProcessor:
                 self.keys[f"sample:{name}"] = {"input": runtime.key("deduplicated_input", {"pairs": row["input_identity"],
                     "upstream_provenance": row["input_header"]["sidecar_identity"]}, [], ["refilter_inputs.py"])}
                 continue
+            if any(not Path(row[k]).is_file() for k in ("fastq_r1", "fastq_r2")):
+                from checkpoint_resume import sorted_checkpoint
+                self.keys[f"sample:{name}"] = {"trim": "missing-raw-inputs", "sorted": sorted_checkpoint(runtime, name)}
+                continue
             trim = runtime.key("trim", {"inputs": [identity(Path(row[k])) for k in ("fastq_r1", "fastq_r2")],
                                        "run_fastp": self.c["RUN_FASTP"], "fastp_args": self.c["FASTP_EXTRA_ARGS"]}, ["fastp"])
             sorted_key = runtime.key("sorted", {"trim": trim, "reference": ref["identity"],
@@ -107,6 +111,8 @@ class PairProcessor:
     def ensure_trim(self, key):
         entity = self.plan["entities"][key]
         row = self.plan["samples"][entity["name"]]
+        if any(not Path(row[k]).is_file() for k in ("fastq_r1", "fastq_r2")):
+            raise ValueError(f"No reusable sorted/deduplicated checkpoint for {key}; missing original FASTQs are required")
         if not truth(self.c["RUN_FASTP"]) or self.reusable(key, "sorted"):
             return Path(row["fastq_r1"]), Path(row["fastq_r2"])
         outputs = self.trim_outputs(entity)
@@ -180,8 +186,10 @@ class PairProcessor:
                  "--max-inter-align-gap", self.c["PAIRTOOLS_MAX_INTER_ALIGN_GAP"], "--max-molecule-size", self.c["PAIRTOOLS_MAX_MOLECULE_SIZE"],
                  "--report-alignment-end", "5", "--drop-sam", "--drop-seq", "--add-columns", "mapq"],
                 ["pairtools", "sort", "--nproc", self.c["THREADS_SORT"], "--memory", self.c["PAIRTOOLS_SORT_MEMORY"], "--tmpdir", str(work)],
+                [sys.executable, str(ROOT / "scripts/pairs_receipt.py"), "--report", str(work / "sorted_receipt.json")],
                 ["bgzip", "-@", self.c["THREADS_COMPRESS"]]], t["pairs"], self.rt.log(entity, "align_parse_sort"))
-            self.write_proof(t, entity, "sorted", keys["sorted"], destination)
+            receipt = json.loads((work / "sorted_receipt.json").read_text())
+            self.write_proof(t, entity, "sorted", keys["sorted"], destination, {"logical_data_sha256": receipt["data_sha256"], "records": receipt["records"]})
         store.run("sorted", keys["sorted"], outputs, align)
         return destination
 
@@ -189,9 +197,17 @@ class PairProcessor:
         if len(sources) == 1:
             shutil.copyfile(sources[0], destination)
         else:
-            self.rt.pipeline([["pairtools", "merge", "--nproc", self.c["THREADS_MERGE"], "--memory", self.c["PAIRTOOLS_MERGE_MEMORY"],
-                               "--tmpdir", str(work), *map(str, sources)], ["bgzip", "-@", self.c["THREADS_COMPRESS"]]],
+            self.rt.pipeline([self.merge_command(sources, work), ["bgzip", "-@", self.c["THREADS_COMPRESS"]]],
                              destination, self.rt.log(entity, "merge"))
+
+    def merge_command(self, sources, work):
+        return [sys.executable, str(ROOT / "scripts/checked_merge.py"), "--threads", self.c["THREADS_MERGE"],
+                "--memory", self.c["PAIRTOOLS_MERGE_MEMORY"], "--fan-in", self.c["MERGE_FAN_IN"], "--readers", self.c["MERGE_READERS"], "--max-inputs", self.c["MAX_MERGE_INPUTS"],
+                "--tmpdir", str(work / "checked_merge"), "--report", str(work / "merge_receipt.json"), *map(str, sources)]
+
+    def streaming(self, key):
+        return (self.plan["entities"][key]["kind"] == "dedup" and self.c["MERGE_DEDUP_MODE"] == "stream"
+                and not truth(self.c["KEEP_RAW_MERGED_PAIRS"]) and not self.available(key, "sorted"))
 
     def ensure_dedup(self, key):
         entity, keys = self.plan["entities"][key], self.keys[key]
@@ -202,12 +218,20 @@ class PairProcessor:
         outputs = {"pairs": destination, "stats": Path(paths["dedup_stats"]), "provenance": proof_path(destination)}
         if store.ensure_reusable("dedup", keys["dedup"], outputs):
             return destination
-        source = self.ensure_sorted(key)
+        stream = self.streaming(key)
+        sources = [self.ensure_sorted(f"sample:{name}") for name in entity["members"]] if stream else [self.ensure_sorted(key)]
+        if stream:
+            for source in sources:
+                verify_proof_payload(source, read_proof(source))
         def dedup(t, work):
-            self.rt.pipeline([["pairtools", "dedup", "--backend", self.c["DEDUP_BACKEND"], "--method", self.c["DEDUP_METHOD"],
+            self.rt.pipeline([self.merge_command(sources, work), ["pairtools", "dedup", "--backend", self.c["DEDUP_BACKEND"], "--method", self.c["DEDUP_METHOD"],
                 "--max-mismatch", self.c["DEDUP_MAX_MISMATCH"], "--chunksize", self.c["DEDUP_CHUNKSIZE"], "--carryover", self.c["DEDUP_CARRYOVER"],
-                "--output-stats", str(t["stats"]), str(source)], ["bgzip", "-@", self.c["THREADS_COMPRESS"]]], t["pairs"], self.rt.log(entity, "dedup"))
-            self.write_proof(t, entity, "dedup", keys["dedup"], destination)
+                "--output-stats", str(t["stats"])], ["bgzip", "-@", self.c["THREADS_COMPRESS"]]], t["pairs"], self.rt.log(entity, "dedup"))
+            receipt = json.loads((work / "merge_receipt.json").read_text())
+            totals = dict(line.rstrip().split("\t", 1) for line in t["stats"].read_text().splitlines() if "\t" in line)
+            if int(totals.get("total", -1)) != receipt["records"]:
+                raise ValueError("Merged input and deduplication total do not reconcile")
+            self.write_proof(t, entity, "dedup", keys["dedup"], destination, {"merge_receipt": receipt, "streamed_joint_merge": stream})
         store.run("dedup", keys["dedup"], outputs, dedup)
         return destination
 
@@ -279,7 +303,8 @@ class PairProcessor:
                     digest = self.rt.digests[digest_key]
             def accept(t, work):
                 command = [sys.executable, str(ROOT / "scripts/filter_contact_pairs.py"), "--input", str(source), "--policy", str(policy_file),
-                           "--chrom-sizes", ref["chrom_sizes"], "--matrix-chrom-sizes", paths["chrom_sizes"], "--qc", str(t["qc"])]
+                           "--chrom-sizes", ref["chrom_sizes"], "--matrix-chrom-sizes", paths["chrom_sizes"], "--qc", str(t["qc"]),
+                           "--batch-records", self.c["FILTER_BATCH_RECORDS"], "--batch-bytes", self.c["FILTER_BATCH_BYTES"], "--engine", self.c["CONTACT_FILTER_ENGINE"]]
                 if digest:
                     command += ["--digest", str(digest)]
                 commands = [command]
@@ -311,8 +336,18 @@ class PairProcessor:
     def stats(self, key):
         entity = self.plan["entities"][key]
         output = Path(entity["paths"]["stats"])
+        sources = []
+        if entity["kind"] == "pool" and not entity.get("legacy_pool") and self.c["POOL_STATS_MODE"] == "merge":
+            sources = [self.plan["entities"][unit] for unit in entity["units"]]
+            validate_pool_inputs([Path(e["paths"]["accepted"]) for e in sources])
+            if any("stats" not in e["paths"] for e in sources):
+                sources = []  # standalone external pools retain the direct-scan fallback
+            for source in sources:
+                self.stats(source["id"])
+        command = (["pairtools", "stats", "--merge", *[e["paths"]["stats"] for e in sources]] if sources else
+                   ["pairtools", "stats", "--nproc-in", "1", entity["paths"]["accepted"]])
         self.rt.store(entity).run("stats", self.rt.key("stats", self.keys[key]["accepted"], ["pairtools"]), {"stats": output},
-            lambda t, work: self.rt.command(["pairtools", "stats", entity["paths"]["accepted"]], self.rt.log(entity, "stats"), output=t["stats"]))
+            lambda t, work: self.rt.command(command, self.rt.log(entity, "stats"), output=t["stats"]))
 
 
 def validate_pool_inputs(sources: list[Path]) -> list[dict]:

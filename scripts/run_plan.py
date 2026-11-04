@@ -85,8 +85,9 @@ def build_plan(c: dict, sheet: Path, *, check_files=True, mode: str | None = Non
                 safe_id(row["final_pool"])
             row["reference_genome"] = registry.resolve(row["reference_genome"]).reference_id
     else:
-        rows, _, warnings = validate_sheet(sheet, registry, default_id, require_files=check_files,
-                                           check_gzip_files=check_files and truth(c["CHECK_FASTQ_GZIP"]))
+        require_raw = check_files and not truth(c["RESUME_FROM_CHECKPOINTS"])
+        rows, _, warnings = validate_sheet(sheet, registry, default_id, require_files=require_raw,
+                                           check_gzip_files=require_raw and truth(c["CHECK_FASTQ_GZIP"]))
     roots = resolve_roots(c)
     references = {}
     for reference_id in sorted({r["reference_genome"] for r in rows}):
@@ -131,6 +132,7 @@ def build_plan(c: dict, sheet: Path, *, check_files=True, mode: str | None = Non
                     raise ValueError(f"Refilter inputs must be outside the new output/cache roots: {source} is under {roots[category]}")
         else:
             row["fastq_r1"], row["fastq_r2"] = absolute(row["fastq_r1"]), absolute(row["fastq_r2"])
+            row["fastq_identities"] = {k: identity(Path(row[k])) for k in ("fastq_r1", "fastq_r2") if Path(row[k]).is_file()}
         group = row["dedup_group"]
         unit_id = f"dedup:{group}" if group else f"sample:{name}"
         unit = units.setdefault(unit_id, {"members": [], "policy": policy, "reference_id": row["reference_genome"], "entity": unit_id})
@@ -219,6 +221,9 @@ def build_plan(c: dict, sheet: Path, *, check_files=True, mode: str | None = Non
             for label in ("accepted", "filter_qc", "chrom_sizes", "stats", "dedup_stats"):
                 entity["paths"][label] = source["paths"][label]
     for entity in entities.values():
+        input_count = len(entity["members"]) if entity["kind"] == "dedup" else len(entity["units"]) if entity["kind"] == "pool" else 0
+        if input_count > int(c["MAX_MERGE_INPUTS"]):
+            raise ValueError(f"{entity['id']} exceeds MAX_MERGE_INPUTS; use bounded sorted pre-merges before ONE joint dedup pass")
         if entity.get("output_role") == "final":
             selected = set(entity["source_rows"])
             entity["biological_dependencies"] = [key for key, e in entities.items()

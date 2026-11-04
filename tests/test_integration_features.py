@@ -413,7 +413,8 @@ class IntegrationFeatures(unittest.TestCase):
         import shutil
         from workflow_common import text_open
         c = {**self.c, "RUN_FASTP": "false", "RUN_HIC": "false", "RUN_MULTIQC": "false", "RUN_GLOBAL_MULTIQC": "false", "RUN_MERGE_ALL_SAMPLES": "true"}
-        with patch("pipeline.tool_versions", return_value={"pairtools": "1.1.3", "cooler": "fake"}), patch.object(Runtime, "pipeline", fake), patch("pipeline.log"):
+        from mock_rc6_transport import adapt
+        with patch("pipeline.tool_versions", return_value={"pairtools": "1.1.3", "cooler": "fake"}), patch.object(Runtime, "pipeline", adapt(fake)), patch("pipeline.log"):
             plan = build_plan(c, self.sheet)
             self.assertEqual(execute(plan, self.root / "config"), 0)
             pool = plan["entities"]["pool:all_samples_merged"]["paths"]

@@ -1,0 +1,99 @@
+{
+  "input_bytes": 9651135,
+  "input_records": 200000,
+  "results": [
+    {
+      "engine": "scalar",
+      "output_sha256": "d0046c56f0de5c17e587ec9ac5587d6d2a8ac5e92a9e8ff24849204599e25d08",
+      "peak_process_rss_bytes": 58871808,
+      "qc": {
+        "accepted_cis": 160000,
+        "accepted_trans": 40000,
+        "diagnostic_flags": {
+          "different_fragment_cis": 160000,
+          "trans": 40000
+        },
+        "eligible_cis_distance_orientation_log2": {
+          "+-:log2_10": 19,
+          "+-:log2_11": 37,
+          "+-:log2_12": 74,
+          "+-:log2_13": 147,
+          "+-:log2_14": 295,
+          "+-:log2_15": 591,
+          "+-:log2_16": 1181,
+          "+-:log2_17": 2363,
+          "+-:log2_18": 4725,
+          "+-:log2_19": 9450,
+          "+-:log2_20": 18900,
+          "+-:log2_21": 37800,
+          "+-:log2_22": 74229,
+          "+-:log2_23": 10180,
+          "+-:log2_9": 9
+        },
+        "exclusive_counts": {
+          "accepted": 200000,
+          "input": 200000
+        },
+        "filter_version": 1,
+        "interpretation": "Orientation/fragment classes are candidates, not proof of molecular origin.",
+        "policy": {
+          "enzymes": [
+            "DpnII"
+          ],
+          "mapq": 30,
+          "min_cis_dist": 0,
+          "remove_adjacent_inward": false,
+          "remove_same_fragment": true
+        }
+      },
+      "seconds": 1.4352416769999934
+    },
+    {
+      "engine": "batched",
+      "output_sha256": "d0046c56f0de5c17e587ec9ac5587d6d2a8ac5e92a9e8ff24849204599e25d08",
+      "peak_process_rss_bytes": 101261312,
+      "qc": {
+        "accepted_cis": 160000,
+        "accepted_trans": 40000,
+        "diagnostic_flags": {
+          "different_fragment_cis": 160000,
+          "trans": 40000
+        },
+        "eligible_cis_distance_orientation_log2": {
+          "+-:log2_10": 19,
+          "+-:log2_11": 37,
+          "+-:log2_12": 74,
+          "+-:log2_13": 147,
+          "+-:log2_14": 295,
+          "+-:log2_15": 591,
+          "+-:log2_16": 1181,
+          "+-:log2_17": 2363,
+          "+-:log2_18": 4725,
+          "+-:log2_19": 9450,
+          "+-:log2_20": 18900,
+          "+-:log2_21": 37800,
+          "+-:log2_22": 74229,
+          "+-:log2_23": 10180,
+          "+-:log2_9": 9
+        },
+        "exclusive_counts": {
+          "accepted": 200000,
+          "input": 200000
+        },
+        "filter_version": 1,
+        "interpretation": "Orientation/fragment classes are candidates, not proof of molecular origin.",
+        "policy": {
+          "enzymes": [
+            "DpnII"
+          ],
+          "mapq": 30,
+          "min_cis_dist": 0,
+          "remove_adjacent_inward": false,
+          "remove_same_fragment": true
+        }
+      },
+      "seconds": 1.3440833139999881
+    }
+  ],
+  "scope": "Synthetic filtering only; not production throughput or whole-workflow acceleration"
+}

@@ -4,7 +4,14 @@
 
 The first implementation follows the style of the existing Shell repositories `fastq2tracks` and `rnaseq2tracksP`: a top-level runner, `config/`, `docs/`, `examples/`, `scripts/`, `environment.yml`, and simple tests.
 
-Version **3.0.0-rc5** adds dependency-ready stage scheduling and library-first
+Version **3.0.0-rc6** adds checked streaming joint deduplication, bounded contact
+filtering and parallel Juicer export, compatible pooled QC/raw-count reuse,
+checkpoint-only recovery, and stronger resource/publication safeguards.
+See the [RC6 upgrade and safety guide](docs/18_rc6_streaming_recovery_and_storage.md).
+It preserves scientific settings and independent-library multiplicity; it does
+not install software, replace a server launcher, or launch production analysis.
+
+RC5 introduced dependency-ready stage scheduling and library-first
 contact processing to the integrated Micro-C/Hi-C workflow. It is a complete
 performance-update candidate, not a change to the running server installation.
 See the [performance and upgrade guide](docs/17_stage_scheduling_and_library_outputs.md)
@@ -12,7 +19,7 @@ and the [current test report](TEST_REPORT.md) before deploying.
 
 For a 140-thread / 500-GB server, the optional
 [`server_140cpu_500gb.conf`](config/server_140cpu_500gb.conf) profile supplies two
-32-thread alignments, independent stage limits, a 120-CPU / 400-GiB admission
+50-thread alignments, independent stage limits, a 140-CPU / 400-GiB admission
 budget and bounded prepared-input backlog. Copy its settings into your project
 config; no new environment, packages or production genome indexes are required.
 These are starting reservations, not measured speed/RSS guarantees or a

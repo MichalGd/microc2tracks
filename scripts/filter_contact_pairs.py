@@ -12,7 +12,7 @@ from pathlib import Path
 
 from prepare_restriction_fragments import load_digest
 from reference_registry import read_sizes
-from workflow_common import json_write, text_open
+from workflow_common import bounded_lines, json_write, text_open
 
 FILTER_VERSION = 1
 REQUIRED = ["readID", "chrom1", "pos1", "chrom2", "pos2", "strand1", "strand2", "pair_type", "mapq1", "mapq2"]
@@ -33,7 +33,7 @@ def classify(chrom1, pos1, strand1, frag1, chrom2, pos2, strand2, frag2):
     return "different_fragment_cis"
 
 
-def filter_contacts(source: Path, output, policy: dict, sizes: dict[str, int], retained: set[str], digest=None) -> dict:
+def filter_contacts(source: Path, output, policy: dict, sizes: dict[str, int], retained: set[str], digest=None, *, max_line_bytes=None) -> dict:
     columns = None
     counts, flags, distances = Counter(), Counter(), Counter()
     accepted_cis, accepted_trans = 0, 0
@@ -41,7 +41,7 @@ def filter_contacts(source: Path, output, policy: dict, sizes: dict[str, int], r
     if restriction and (digest is None or set(digest) != set(sizes) or any(digest[c][-1] != sizes[c] for c in sizes)):
         raise ValueError("Digest/reference chromosome or length inconsistency")
     with text_open(source) as handle:
-        for number, line in enumerate(handle, 1):
+        for number, line in enumerate(bounded_lines(handle, max_line_bytes) if max_line_bytes else handle, 1):
             if line.startswith("#columns:"):
                 columns = line.split(":", 1)[1].split()
                 if len(set(columns)) != len(columns) or any(name not in columns for name in REQUIRED):
@@ -118,6 +118,9 @@ def main():
     parser.add_argument("--matrix-chrom-sizes", type=Path, required=True)
     parser.add_argument("--digest", type=Path)
     parser.add_argument("--qc", type=Path, required=True)
+    parser.add_argument("--batch-records", type=int, default=50000)
+    parser.add_argument("--batch-bytes", type=int, default=16777216)
+    parser.add_argument("--engine", choices=["batched", "scalar"], default="batched")
     parser.add_argument("--legacy-pool", action="store_true", help="Chromosome selection only; upstream filtering is unverified")
     args = parser.parse_args()
     if args.legacy_pool:
@@ -144,9 +147,13 @@ def main():
         qc = {"exclusive_counts": dict(counts), "accepted_cis": cis, "accepted_trans": trans,
               "limited_provenance": "Legacy pool: upstream quality, distance, restriction filtering and duplicate scope are unverified"}
     else:
-        qc = filter_contacts(args.input, sys.stdout, json.loads(args.policy.read_text()),
-                             read_sizes(args.chrom_sizes, "reference"), set(read_sizes(args.matrix_chrom_sizes, "retained")),
-                             load_digest(args.digest) if args.digest else None)
+        from batched_filter import filter_batched
+        if args.batch_records < 1 or args.batch_bytes < 1:
+            parser.error("Batch bounds must be positive")
+        arguments = (args.input, sys.stdout, json.loads(args.policy.read_text()), read_sizes(args.chrom_sizes, "reference"),
+                     set(read_sizes(args.matrix_chrom_sizes, "retained")), load_digest(args.digest) if args.digest else None)
+        qc = (filter_batched(*arguments, args.batch_records, args.batch_bytes) if args.engine == "batched" else
+              filter_contacts(*arguments, max_line_bytes=args.batch_bytes))
     json_write(args.qc, qc)
 
 

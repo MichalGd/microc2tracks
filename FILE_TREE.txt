@@ -23,6 +23,8 @@ microc2tracks/
     samplesheet_template.csv
     server_140cpu_500gb.conf
   docs/
+    18_rc6_streaming_recovery_and_storage.md
+    rc6_filter_benchmark.json
     01_analysis_and_design.md
     02_installation_server.md
     03_inputs_and_config.md
@@ -51,6 +53,15 @@ microc2tracks/
     run_refilter_deduplicated_example.sh
     samplesheet_library_final.csv
   scripts/
+    batched_filter.py
+    build_release.py
+    checked_merge.py
+    checkpoint_resume.py
+    juicer_export.py
+    pairs_receipt.py
+    pool_cooler.py
+    rc5_compatibility.py
+    resource_monitor.py
     artifact_state.py
     call_tads_from_insulation.py
     check_fastq_pair_names.py
@@ -84,6 +95,11 @@ microc2tracks/
     validate_samplesheet.py
     workflow_common.py
   tests/
+    benchmark_rc6.py
+    mock_rc6_transport.py
+    test_checked_merge.py
+    test_rc6_real_science.py
+    test_rc6_safety.py
     check_bash_syntax.sh
     test_hic_output_scope.py
     test_integration_features.py

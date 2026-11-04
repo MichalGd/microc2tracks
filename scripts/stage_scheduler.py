@@ -61,6 +61,7 @@ def resource_profile(c: dict) -> dict:
     limits = {kind: int(c[key]) for kind, key in {
         "fastp": "MAX_PARALLEL_FASTP", "alignment": "MAX_PARALLEL_ALIGNMENTS", "merge": "MAX_PARALLEL_MERGES",
         "dedup": "MAX_PARALLEL_DEDUP", "filter": "MAX_PARALLEL_FILTER", "matrix": "MAX_PARALLEL_MATRIX",
+        "joint_dedup": "MAX_PARALLEL_JOINT_DEDUP",
         "hic": "MAX_PARALLEL_HIC", "downstream": "MAX_PARALLEL_DOWNSTREAM", "report": "MAX_PARALLEL_REPORTS"}.items()}
     return {"cpu_budget": cpus, "memory_gib": memory, "limits": limits,
             "requested_memory_gib": requested_memory,
@@ -72,11 +73,18 @@ def reservation(kind: str, c: dict, plan: dict) -> tuple[int, float]:
     cpu = {"fastp": int(c["THREADS_FASTP"]) + 1,
            "alignment": int(c["THREADS_ALIGN"]) + int(c["THREADS_SORT"]) + compression + 4,
            "merge": int(c["THREADS_MERGE"]) + compression + 2,
-           "dedup": compression + 2, "filter": compression + 2,
+           "dedup": compression + 3, "joint_dedup": int(c["THREADS_MERGE"]) + compression + 3,
+           "filter": compression + 2,
            "matrix": max(int(c["THREADS_MATRIX"]), int(c["THREADS_BALANCE"])) + 2,
            "hic": int(c["THREADS_HIC_NORM"]) + 4,
-           "downstream": int(c["COOLTOOLS_THREADS"]) + 2, "report": 1}[kind]
+           "downstream": int(c["COOLTOOLS_THREADS"]) + 2, "report": 3}[kind]
     memory = float(c[f"MEMORY_{'ALIGN' if kind == 'alignment' else kind.upper()}_GB"])
+    if kind in {"merge", "dedup", "joint_dedup"}:
+        readers = max((len(e.get("units", [])) if e.get("kind") == "pool" else len(e["members"]) for e in plan.get("entities", {}).values()
+                       if e.get("kind") in {"dedup", "pool"}), default=1) if kind != "dedup" else 1
+        cpu += min(readers, int(c["MERGE_READERS"]))
+        if kind == "joint_dedup" and not memory:
+            memory = (float(c["MEMORY_MERGE_GB"]) or size_gib(c["PAIRTOOLS_MERGE_MEMORY"]) + 1) + float(c["MEMORY_DEDUP_GB"]) + 4
     if not memory:
         if kind == "alignment":
             # Conservative index + sort allowance; site profiles should override
@@ -106,14 +114,18 @@ class Task:
     prepares: str = ""
     consumes: str = ""
     cached: Callable | None = None
+    disk: dict = field(default_factory=dict)
+    prepared_bytes: int = 0
 
 
 class StageScheduler:
-    def __init__(self, profile: dict, stop: threading.Event, notify: Callable | None = None):
+    def __init__(self, profile: dict, stop: threading.Event, notify: Callable | None = None, guard=None):
         self.profile, self.stop, self.notify = profile, stop, notify or (lambda event: None)
         self.used_cpu, self.used_memory = 0, 0.0
         self.active, self.prepared = {}, set()
         self.states = {}
+        self.guard = guard
+        self.prepared_sizes = {}
 
     def emit(self, task, state, reason="", **extra):
         previous = self.states.get(task.id, {})
@@ -157,6 +169,7 @@ class StageScheduler:
                         raise InterruptedError("Stage scheduler interrupted")
                     made_progress = False
                     waiting_for_ram = False
+                    waiting_for_disk = False
                     for task in sorted(pending.values(), key=lambda t: (t.priority, order[t.id])):
                         if not task.dependencies <= completed:
                             self.emit(task, "queued", "dependencies")
@@ -168,8 +181,10 @@ class StageScheduler:
                             made_progress = True
                             if task.prepares:
                                 self.prepared.add(task.prepares)
+                                self.prepared_sizes[task.prepares] = task.prepared_bytes
                             if task.consumes:
                                 self.prepared.discard(task.consumes)
+                                self.prepared_sizes.pop(task.consumes, None)
                             self.emit(task, "reused")
                             del pending[task.id]
                             continue
@@ -186,6 +201,12 @@ class StageScheduler:
                             waiting_for_ram = True
                         elif task.prepares and task.prepares not in self.prepared and len(self.prepared) >= self.profile["max_prepared"]:
                             reason = "prepared-input backlog"
+                        elif (task.prepares and task.prepares not in self.prepared and self.profile.get("max_prepared_bytes", 0)
+                              and sum(self.prepared_sizes.values()) + task.prepared_bytes > self.profile["max_prepared_bytes"]):
+                            reason = "prepared-input byte budget"
+                        elif self.guard and not self.guard.reserve(task.id, task.disk):
+                            reason = "filesystem reservations"
+                            waiting_for_disk = True
                         if reason:
                             self.emit(task, "queued", reason)
                             continue
@@ -194,6 +215,7 @@ class StageScheduler:
                         self.active[task.kind] = self.active.get(task.kind, 0) + 1
                         if task.prepares:
                             self.prepared.add(task.prepares)
+                            self.prepared_sizes[task.prepares] = task.prepared_bytes
                         self.emit(task, "running")
                         running[pool.submit(task.action)] = (task, time.monotonic())
                         del pending[task.id]
@@ -201,7 +223,7 @@ class StageScheduler:
                         if pending:
                             if made_progress:
                                 continue
-                            if waiting_for_ram:
+                            if waiting_for_ram or waiting_for_disk:
                                 # Another user's process can temporarily consume
                                 # RAM. Keep this distinct from a dependency deadlock.
                                 self.stop.wait(0.2)
@@ -214,6 +236,8 @@ class StageScheduler:
                         self.used_cpu -= task.cpus
                         self.used_memory = max(0, self.used_memory - task.memory)
                         self.active[task.kind] -= 1
+                        if self.guard:
+                            self.guard.release(task.id)
                         try:
                             future.result()
                         except BaseException:
@@ -222,6 +246,7 @@ class StageScheduler:
                         completed.add(task.id)
                         if task.consumes:
                             self.prepared.discard(task.consumes)
+                            self.prepared_sizes.pop(task.consumes, None)
                         self.emit(task, "complete", duration_seconds=time.monotonic()-started)
             except BaseException:
                 self.stop.set()
@@ -236,4 +261,7 @@ class StageScheduler:
             finally:
                 self.used_cpu, self.used_memory = 0, 0.0
                 self.active.clear()
+                if self.guard:
+                    for task in tasks:
+                        self.guard.release(task.id)
         return self.states

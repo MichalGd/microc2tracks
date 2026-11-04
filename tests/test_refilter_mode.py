@@ -231,7 +231,8 @@ class RefilterModeTests(unittest.TestCase):
         def serialized(*args, **kwargs):
             with mock_stdin_lock:
                 return fake(*args, **kwargs)
-        return serialized
+        from mock_rc6_transport import adapt
+        return adapt(serialized)
 
     def test_runner_skips_alignment_and_dedup_preserves_inputs_and_rebuilds_products(self):
         original, index, original_id = sha256(self.source), sha256(self.index), source_identity(self.source)

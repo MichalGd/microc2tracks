@@ -15,9 +15,21 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-VERSION = "3.0.0-rc5"
+VERSION = "3.0.0-rc6"
 DEFAULTS = {
     "WORKFLOW_MODE": "fastq",
+    "RESUME_FROM_CHECKPOINTS": "false", "REUSE_RC5_OUTPUTS": "true",
+    "MERGE_DEDUP_MODE": "stream", "MERGE_FAN_IN": "8", "MERGE_READERS": "2", "MAX_MERGE_INPUTS": "256",
+    "MAX_PARALLEL_JOINT_DEDUP": "2", "MEMORY_JOINT_DEDUP_GB": "0",
+    "FILTER_BATCH_RECORDS": "50000", "FILTER_BATCH_BYTES": "16777216",
+    "CONTACT_FILTER_ENGINE": "batched",
+    "JUICER_EXPORT_BATCH_BYTES": "1048576",
+    "JUICER_COMPRESSION_LEVEL": "3", "POOL_STATS_MODE": "merge",
+    "POOL_COOLER_MODE": "counts", "COOLER_MERGE_BUFFER": "1000000",
+    "SCRATCH_BUDGET_GB": "0", "STAGE_SCRATCH_RESERVATION_GB": "0",
+    "STAGE_OUTPUT_RESERVATION_GB": "0", "MAX_PREPARED_GB": "0",
+    "MAX_PROCESS_TREE_RSS_GB": "0",
+    "SCRATCH_ESTIMATE_FACTOR": "6", "OUTPUT_ESTIMATE_FACTOR": "2",
     "OUTDIR": "results", "TMPDIR": "", "PAIRS_OUTDIR": "", "MATRIX_OUTDIR": "",
     "TRIMMED_OUTDIR": "", "REFERENCE_CACHE_DIR": "", "LARGE_OUTPUT_STAGING": "destination",
     "REQUIRED_STORAGE_MOUNTS": "", "MIN_FREE_OUTPUT_GB": "10", "MIN_FREE_SCRATCH_GB": "20",
@@ -155,10 +167,10 @@ def validate_config(c: dict[str, str]) -> None:
     for key, value in c.items():
         if key.startswith("MEMORY_") and (not float(value) >= 0 or not float(value) < float("inf")):
             raise ValueError(f"{key} must be finite and non-negative")
-    for key in ("REUSE_RC4_OUTPUTS", "REUSE_SINGLE_LIBRARY_ARTIFACTS"):
+    for key in ("REUSE_RC4_OUTPUTS", "REUSE_RC5_OUTPUTS", "REUSE_SINGLE_LIBRARY_ARTIFACTS", "RESUME_FROM_CHECKPOINTS"):
         truth(c[key])
     for key in c:
-        if key.startswith(("RUN_", "KEEP_", "BUILD_", "CHECK_", "CLEAN_", "FILTER_", "HIC_REMOVE_")):
+        if key.startswith(("RUN_", "KEEP_", "BUILD_", "CHECK_", "CLEAN_", "FILTER_", "HIC_REMOVE_")) and not key.startswith("FILTER_BATCH_"):
             truth(c[key])
     positive = [k for k in c if k.startswith(("THREADS_", "MAX_PARALLEL_"))]
     positive += ["BASE_RESOLUTION", "DEDUP_CHUNKSIZE", "DEDUP_CARRYOVER", "STORAGE_CHECK_INTERVAL"]
@@ -175,6 +187,22 @@ def validate_config(c: dict[str, str]) -> None:
         raise ValueError("Invalid PAIRTOOLS_WALKS_POLICY")
     if c["LARGE_OUTPUT_STAGING"] not in {"destination", "scratch"}:
         raise ValueError("LARGE_OUTPUT_STAGING must be destination/scratch")
+    if c["MERGE_DEDUP_MODE"] not in {"stream", "materialized"}:
+        raise ValueError("MERGE_DEDUP_MODE must be stream/materialized")
+    if int(c["MERGE_FAN_IN"]) < 2:
+        raise ValueError("MERGE_FAN_IN must be >= 2")
+    if c["POOL_STATS_MODE"] not in {"merge", "scan"} or c["POOL_COOLER_MODE"] not in {"counts", "pairs"}:
+        raise ValueError("POOL_STATS_MODE=merge/scan; POOL_COOLER_MODE=counts/pairs")
+    if c["CONTACT_FILTER_ENGINE"] not in {"batched", "scalar"}:
+        raise ValueError("CONTACT_FILTER_ENGINE must be batched/scalar")
+    for key in ("MERGE_FAN_IN", "MERGE_READERS", "MAX_MERGE_INPUTS", "FILTER_BATCH_RECORDS", "FILTER_BATCH_BYTES", "JUICER_EXPORT_BATCH_BYTES", "COOLER_MERGE_BUFFER"):
+        if not c[key].isdigit() or int(c[key]) < 1:
+            raise ValueError(f"{key} must be positive")
+    if not c["JUICER_COMPRESSION_LEVEL"].isdigit() or not 0 <= int(c["JUICER_COMPRESSION_LEVEL"]) <= 9:
+        raise ValueError("JUICER_COMPRESSION_LEVEL must be 0..9")
+    for key in ("SCRATCH_BUDGET_GB", "STAGE_SCRATCH_RESERVATION_GB", "STAGE_OUTPUT_RESERVATION_GB", "MAX_PREPARED_GB", "MAX_PROCESS_TREE_RSS_GB", "SCRATCH_ESTIMATE_FACTOR", "OUTPUT_ESTIMATE_FACTOR"):
+        if not 0 <= float(c[key]) < float("inf"):
+            raise ValueError(f"{key} must be finite and non-negative")
     for key in ("MIN_FREE_OUTPUT_GB", "MIN_FREE_SCRATCH_GB", "MIN_AVAILABLE_MEMORY_GB"):
         if not 0 <= float(c[key]) < float("inf"):
             raise ValueError(f"{key} must be a finite non-negative number")
@@ -192,7 +220,15 @@ def json_write(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + f".tmp.{os.getpid()}")
     tmp.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    with tmp.open("r+b") as handle:
+        os.fsync(handle.fileno())
     os.replace(tmp, path)
+    if os.name != "nt":
+        descriptor = os.open(path.parent, os.O_DIRECTORY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
 
 
 def tsv_write(path: Path, rows: list[dict], fields: list[str]) -> None:
@@ -227,6 +263,17 @@ def text_open(path: Path):
     if str(path) == "-":
         return contextlib.nullcontext(sys.stdin)
     return gzip.open(path, "rt", encoding="utf-8") if path.suffix.lower() == ".gz" else path.open(encoding="utf-8")
+
+
+def bounded_lines(handle, max_bytes=16777216):
+    """Reject a single oversized record without first reading an unlimited line."""
+    while True:
+        line = handle.readline(max_bytes + 1)
+        if not line:
+            return
+        if len(line) > max_bytes or len(line.encode("utf-8")) > max_bytes:
+            raise ValueError("Single input line exceeds configured byte bound")
+        yield line
 
 
 def registry_data(path: Path) -> dict:

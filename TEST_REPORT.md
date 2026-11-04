@@ -1,5 +1,81 @@
 # Test Report
 
+## RC6 bounded-streaming candidate: 2026-11-04
+
+Runtime: `3.0.0-rc6`; reviewed RC5 base:
+`2ab2a8bcb27f82f8342ec60ab3c631433c962463`. Historical RC4/RC5 server results
+below do not certify the changed RC6 runtime.
+
+### Executed locally
+
+- Windows regression discovery: **93 tests, 83 passed, 10 skipped**. The skipped
+  tests were five full-tool tests, three opt-in pairtools/Cooler checks and two
+  POSIX-only merge tests. Git Bash syntax checks passed for all shipped shell
+  runners/examples. These are not server production-throughput measurements.
+- Linux/WSL regression discovery with `MICROC2TRACKS_PAIR_TOOLS_TESTS=1` and
+  `MICROC2TRACKS_REAL_TOOLS=0`: **93 tests, 88 passed, five skipped**. The five
+  skips are the full FASTQ/BWA/fastp/Juicer tests, not failures or passes.
+- Isolated Linux scientific environment: Python 3.12.3, pairtools 1.1.3,
+  Cooler 0.10.4, NumPy 1.26.4, SciPy 1.17.1, pandas 3.0.3, h5py 3.16.0,
+  pysam 0.23.3. Pairtools was built from its pinned v1.1.3 source tag using
+  Cython 0.29.37. This local test environment did not change biolserv software.
+- Real checked merge/GNU sort tests include eleven inputs (above the fan-in),
+  full-line tie order, reader receipts, truncated gzip rejection and FIFO cleanup.
+- Real pairtools streamed versus materialized merging/deduplication retained
+  identical ordered data records, including the existing 10,000-row chunk bridge.
+  Its two representatives remained unchanged; no dedup backend/chunk change.
+- Real accepted-statistics aggregation matched a direct pooled pass.
+- Real Cooler raw-count pooling matched direct integer pixels, excluded weight
+  columns, reconciled accepted totals, checked convergence/NaN masks and finite
+  weights (`rtol=1e-6`, `atol=1e-10`), and exercised dense-bin buffer overshoot.
+  Extended checks cover 1/2/5-kb coarsening and int64-overflow rejection.
+- Scalar/batched restriction and Micro-C filtering compared exact records and
+  complete QC across seeded contacts, orientations, cutoffs, batch boundaries
+  and reordered columns. Juicer projection matched the prior decompressed short
+  format. These export tests do not certify a new end-to-end `.hic` build.
+- Recovery tests cover removed FASTQs, removed sorted prerequisites with retained
+  completed library outputs, scientific-contract rejection, exact RC5 key-formula
+  migration without rewriting original payload/provenance, interrupted publication
+  journals and shared-filesystem reservations. Existing ownership, relocation,
+  cancellation and unchanged Micro-C regressions remain included.
+
+Expected test diagnostics include a deliberately corrupted gzip reader, synthetic
+addNorm failure, sparse-fixture pairtools division warnings and a deliberately
+small Cooler buffer warning. They do not indicate a failed final test run.
+
+### Bounded performance check and limits
+
+The [recorded synthetic filter comparison](docs/rc6_filter_benchmark.json) uses
+200,000 generated contacts (9,651,135 input bytes), two 100-Mb synthetic chromosome
+axes and periodic restriction fragments. Scalar and batched output SHA256/QC are
+identical. One run measured **1.435 s / 56.1 MiB peak process RSS** for scalar and
+**1.344 s / 96.6 MiB** for batched. A smaller-digest fixture was slightly slower
+when batched. These small shared-WSL kernel observations establish neither a
+large filtering acceleration nor a whole-workflow speedup. Imports were warmed
+equally and outputs were hashed rather than written as large compressed files.
+Use `CONTACT_FILTER_ENGINE=scalar` when site measurements favor it.
+
+The principal expected gains are eliminating redundant complete merged-file I/O,
+pooled-pairs QC rereads/re-binning, and serial gzip export compression. Their
+production wall time, peak scratch and process-tree RSS have not been benchmarked
+on the 140-thread/500-GB server. Resource reservations and polling are estimates,
+not OS-enforced CPU/RAM/disk quotas or proof of safety for every dataset.
+
+### Required server gate before default promotion
+
+Use the existing environment/JAR/references read-only, stage the complete new
+version alongside RC5, check access as an unprivileged account, then run:
+
+```bash
+MICROC2TRACKS_PAIR_TOOLS_TESTS=1 python -B -m unittest discover -s tests -p test_rc6_real_science.py -v
+MICROC2TRACKS_REAL_TOOLS=1 JUICER_TOOLS_JAR=/path/to/existing/juicer_tools.2.18.00.jar \
+  python -B -m unittest discover -s tests -p test_real_tools.py -v
+```
+
+Those five tiny full-tool tests remain unexecuted for RC6 in this local setup.
+No production FASTQs or live server outputs were used, removed or modified.
+The GitHub tag denotes a release candidate, not automatic server installation.
+
 ## RC5 performance update preparation: 2026-10-29
 
 Runtime candidate: `3.0.0-rc5`, implemented on the clean RC4 default commit

@@ -5,9 +5,10 @@ import gzip
 import json
 import shutil
 import contextlib
+import sys
 from pathlib import Path
 
-from workflow_common import builds_hic, json_write, text_open, truth
+from workflow_common import ROOT, builds_hic, identity, json_write, text_open, truth
 
 
 def export_juicer(source: Path, destination: Path) -> int:
@@ -69,9 +70,19 @@ class MatrixProducts:
 
         def ensure_raw():
             def raw(t, work):
-                rt.command(["cooler", "cload", "pairix", "--assembly", ref["assembly"], "-p", c["THREADS_MATRIX"],
-                            f"{sizes}:{c['BASE_RESOLUTION']}", str(source), str(t["data"])], rt.log(entity, "cooler_cload"))
+                inputs = self.count_sources(entity)
+                if inputs:
+                    expected = json.loads(Path(paths["filter_qc"]).read_text())["exclusive_counts"]["accepted"]
+                    rt.command([sys.executable, str(ROOT / "scripts/pool_cooler.py"), "--output", str(t["data"]),
+                                "--buffer", c["COOLER_MERGE_BUFFER"], "--expected-total", str(expected), *inputs], rt.log(entity, "cooler_pool_counts"))
+                else:
+                    rt.command(["cooler", "cload", "pairix", "--assembly", ref["assembly"], "-p", c["THREADS_MATRIX"],
+                                f"{sizes}:{c['BASE_RESOLUTION']}", str(source), str(t["data"])], rt.log(entity, "cooler_cload"))
                 rt.command(["cooler", "info", str(t["data"])], rt.log(entity, "cooler_info"), output=t["info"])
+                actual = json.loads(t["info"].read_text())["sum"]
+                expected = json.loads(Path(paths["filter_qc"]).read_text())["exclusive_counts"]["accepted"]
+                if actual != expected:
+                    raise ValueError("Raw matrix total disagrees with accepted-pair QC")
             matrix_stage("raw_cool", raw_key, raw, {"info": Path(paths["cool_info"])})
 
         with (rt.slots["matrix"] if kind in {"all", "matrix"} else contextlib.nullcontext()):
@@ -104,8 +115,16 @@ class MatrixProducts:
             if not store.ensure_reusable("norm_hic", norm_key, {"data": final, "provenance": Path(str(final) + ".provenance.json")}):
                 with rt.slots["hic"]:
                     export_key = rt.key("juicer", accepted_key, [], ["matrix_products.py"])
+                    def export(t, work):
+                        report = work / "export_receipt.json"
+                        rt.pipeline([[sys.executable, str(ROOT / "scripts/juicer_export.py"), "--input", str(source),
+                            "--report", str(report), "--batch-bytes", c["JUICER_EXPORT_BATCH_BYTES"]],
+                            ["bgzip", "-@", c["THREADS_COMPRESS"], "-l", c["JUICER_COMPRESSION_LEVEL"]]], t["pairs"], rt.log(entity, "juicer_export"))
+                        expected = json.loads(Path(paths["filter_qc"]).read_text())["exclusive_counts"]["accepted"]
+                        if json.loads(report.read_text())["records"] != expected:
+                            raise ValueError("Juicer export and accepted-pair counts disagree")
                     store.run("juicer", export_key, {"pairs": Path(paths["juicer"])},
-                              lambda t, work: export_juicer(source, t["pairs"]))
+                              export)
                     pre_key = rt.key("raw_hic", hic_args, ["java"], ["matrix_products.py"])
                     matrix_stage("raw_hic", pre_key, lambda t, work: rt.command(["java", f"-Xmx{c['JAVA_HEAP']}", "-jar", c["JUICER_TOOLS_JAR"],
                         "pre", "-n", "-t", str(work), "-r", c["HIC_RESOLUTIONS"], paths["juicer"], str(t["data"]), sizes], rt.log(entity, "juicer_pre")))
@@ -121,3 +140,41 @@ class MatrixProducts:
                 track = Path(paths["matrix_dir"]) / f"{entity['name']}.ucsc.hic.track.txt"
                 track.write_text(f"# reference_id={entity['reference_id']} assembly={ref['assembly']}\n"
                     f"track type=hic name=\"{entity['name']}\" bigDataUrl={c['PUBLIC_HIC_BASE_URL'].rstrip('/')}/{final.name}\n", encoding="utf-8")
+
+    def count_sources(self, entity):
+        if entity.get("output_role") != "final" or self.c["POOL_COOLER_MODE"] != "counts" or entity.get("legacy_pool"):
+            return []
+        from pairs_processing import validate_pool_inputs
+        units = entity["units"]
+        validate_pool_inputs([Path(self.rt.plan["entities"][unit]["paths"]["accepted"]) for unit in units])
+        parents = entity.get("biological_dependencies") or units
+        members, sources = set(), []
+        for key in parents:
+            item = self.rt.plan["entities"][key]
+            if "members" not in item or "done" not in item["paths"]:
+                return []  # externally declared pools do not own constituent matrices
+            if members.intersection(item["members"]):
+                raise ValueError("Count-pooling source membership overlaps")
+            members.update(item["members"])
+            paths = item["paths"]
+            selected = None
+            for stage in ("raw_cool", "norm_mcool"):
+                path = Path(paths[stage])
+                record = self.rt.store(item).read(stage)
+                if path.is_file() and record.get("status") == "success":
+                    for payload in record.get("outputs", {}).values():
+                        source = Path(payload["path"])
+                        if not source.is_file() or identity(source) != payload:
+                            raise ValueError("Constituent matrix checkpoint has changed")
+                    proof = json.loads(Path(str(path) + ".provenance.json").read_text())
+                    accepted = self.rt.pair_keys[key]["accepted"]
+                    if proof["accepted_signature"] not in {accepted, *self.rt.compatible_keys.get(accepted, [])}:
+                        raise ValueError("Constituent matrix has stale accepted-contact provenance")
+                    selected = str(path) + (f"::/resolutions/{self.c['BASE_RESOLUTION']}" if stage == "norm_mcool" else "")
+                    break
+            if not selected:
+                return []  # Missing constituent products: scientifically identical pairs fallback.
+            sources.append(selected)
+        if members != set(entity["members"]):
+            raise ValueError("Count-pooling sources do not cover exactly the final membership")
+        return sources

@@ -1,5 +1,9 @@
 # Stage scheduling and library/biological outputs (RC5)
 
+Historical RC5 guide. RC6 users should also read [the current streaming/recovery
+guide](18_rc6_streaming_recovery_and_storage.md); the shipped server profile now
+uses two 50-thread aligners and a 140-slot budget, not the original RC5 settings.
+
 RC5 is one integrated Micro-C/Hi-C performance update. No scientific package or
 production genome index needs to be installed or duplicated. It preserves the
 existing assay/reference/filter/resolution/normalization configuration.

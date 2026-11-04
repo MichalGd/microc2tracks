@@ -25,7 +25,7 @@ RC4_HASHES = {
 
 
 def enable(plan, current_hashes, preserve=True):
-    if VERSION != "3.0.0-rc5" or not truth(plan["settings"]["REUSE_RC4_OUTPUTS"]):
+    if VERSION not in {"3.0.0-rc5", "3.0.0-rc6"} or not truth(plan["settings"]["REUSE_RC4_OUTPUTS"]):
         return {}
     metadata = Path(plan.get("metadata_dir", str(Path(plan["roots"]["out"]) / "run_metadata")))
     for filename in ("source_hashes.json", "rc4_source_hashes.json"):
@@ -34,7 +34,7 @@ def enable(plan, current_hashes, preserve=True):
             continue
         saved = json.loads(path.read_text())
         if all(saved.get(key) == value for key, value in RC4_HASHES.items()):
-            immutable = ("filter_contact_pairs.py", "prepare_restriction_fragments.py", "refilter_inputs.py", "run_downstream.sh")
+            immutable = ("prepare_restriction_fragments.py", "refilter_inputs.py", "run_downstream.sh")
             if any(current_hashes.get(name) != RC4_HASHES[name] for name in immutable):
                 raise RuntimeError("RC4 compatibility is not certified for modified scientific modules; disable REUSE_RC4_OUTPUTS and review recomputation")
             preserved = metadata / "rc4_source_hashes.json"

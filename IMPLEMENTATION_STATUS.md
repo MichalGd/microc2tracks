@@ -1,4 +1,15 @@
-# Integrated workflow status: 3.0.0-rc5
+# Integrated workflow status: 3.0.0-rc6
+
+RC6 prepared 2026-11-04 on the reviewed RC5 commit
+`2ab2a8bcb27f82f8342ec60ab3c631433c962463`. Checked bounded streaming, monitored
+parallel Juicer export, bounded vectorized filtering, compatible pooled QC/raw
+counts, explicit missing-FASTQ recovery, RC5 migration, publication journals and
+resource guards are implemented together. See [the RC6 guide](docs/18_rc6_streaming_recovery_and_storage.md)
+and [actual verification results/limits](TEST_REPORT.md). This source update does
+not install/promote the server release or change production data. Deduplication
+algorithms/chunks, native Juicer input and earlier final pooling remain deferred.
+
+## Historical RC5 baseline
 
 RC5 prepared 2026-10-29 as one performance update on top of
 `d55761095d545353d9bc099a4c17e1ff2456ae95`. Stage scheduling, library-only contact

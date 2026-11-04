@@ -31,6 +31,34 @@ def graph(rt, processor, matrices):
             cpus += int(c["THREADS_SORT"]) + 2
             memory += size_gib(c["PAIRTOOLS_SORT_MEMORY"])
         task = Task(f"{key}/{stage}", kind, key, action, set(dependencies), cpus, memory, priority, prepares, consumes, cached)
+        e = plan["entities"][key]
+        inputs = [Path(e["paths"][label]) for label in ("sorted", "dedup", "accepted") if label in e["paths"] and Path(e["paths"][label]).is_file()]
+        if e["kind"] in {"pool", "dedup"}:
+            source_keys = e["units"] if e["kind"] == "pool" else [f"sample:{name}" for name in e["members"]]
+            for unit in source_keys:
+                source = plan["entities"][unit]["paths"]
+                inputs += [Path(source[label]) for label in ("sorted", "accepted") if label in source and Path(source[label]).is_file()]
+        raw_bytes = sum(item.get("size", 0) for name in e.get("source_rows", e["members"])
+                        for item in plan["samples"].get(name, {}).get("fastq_identities", {}).values())
+        amount = max(raw_bytes, sum(p.stat().st_size for p in set(inputs)))
+        task.prepared_bytes = int(raw_bytes * float(c["OUTPUT_ESTIMATE_FACTOR"]))
+        scratch = int(float(c["STAGE_SCRATCH_RESERVATION_GB"]) * 1024**3)
+        fan_in = len(e["units"]) if e["kind"] == "pool" else len(e["members"])
+        if kind == "alignment" or (kind in {"merge", "joint_dedup"} and fan_in > int(c["MERGE_FAN_IN"])):
+            scratch = max(scratch, int(amount * float(c["SCRATCH_ESTIMATE_FACTOR"])))
+        output = max(int(float(c["STAGE_OUTPUT_RESERVATION_GB"]) * 1024**3), int(amount * float(c["OUTPUT_ESTIMATE_FACTOR"]))) if kind != "report" else 0
+        scratch_root = plan["roots"]["scratch"]
+        destination = plan["roots"]["trimmed" if kind == "fastp" else "matrices" if kind in {"matrix", "hic"} else "pairs"]
+        task.disk = {scratch_root: scratch}
+        task.disk[destination] = task.disk.get(destination, 0) + output
+        if c["LARGE_OUTPUT_STAGING"] == "scratch":
+            task.disk[scratch_root] += output  # publication source plus destination copy
+        if kind == "hic" and c["PUBLIC_HIC_DIR"]:
+            publication = str(Path(c["PUBLIC_HIC_DIR"]).resolve())
+            task.disk[publication] = task.disk.get(publication, 0) + output
+        budget = float(c["SCRATCH_BUDGET_GB"]) * 1024**3
+        if budget and task.disk[scratch_root] > budget and not (cached and cached()):
+            raise ValueError(f"{task.id} scratch estimate exceeds SCRATCH_BUDGET_GB; choose larger/explicit HDD scratch or revise the estimate")
         tasks[task.id] = task
         return task.id
 
@@ -78,14 +106,16 @@ def graph(rt, processor, matrices):
         if entity["kind"] == "pool" or not entity.get("contact_processing", True):
             continue
         imported = entity.get("input_stage") == "deduplicated"
+        stream = not imported and processor.streaming(key)
         before = []
         if not imported:
             sorted_id = f"{key}/sorted"
             if entity["kind"] == "dedup":
                 dependencies = [f"sample:{name}/sorted" for name in entity["members"] if f"sample:{name}/sorted" in tasks]
-                add(key, "sorted", "merge", lambda k=key: None if processor.available(k, "accepted") or processor.available(k, "dedup") else processor.ensure_sorted(k),
-                    dependencies, priority=4, cached=lambda k=key: processor.available(k, "accepted") or processor.available(k, "dedup") or known(k, "sorted"))
-            before = [sorted_id] if sorted_id in tasks else []
+                if not stream:
+                    add(key, "sorted", "merge", lambda k=key: None if processor.available(k, "accepted") or processor.available(k, "dedup") else processor.ensure_sorted(k),
+                        dependencies, priority=4, cached=lambda k=key: processor.available(k, "accepted") or processor.available(k, "dedup") or known(k, "sorted"))
+            before = dependencies if stream else [sorted_id] if sorted_id in tasks else []
             def deduplicate(k=key):
                 if processor.available(k, "accepted"):
                     return
@@ -95,7 +125,7 @@ def graph(rt, processor, matrices):
                     record = rt.store(e).read("sorted")
                     if record.get("run_id") == plan["run_id"]:
                         rt.store(e).remove_owned(Path(e["paths"]["sorted"]))
-            dedup = add(key, "dedup", "dedup", deduplicate,
+            dedup = add(key, "dedup", "joint_dedup" if stream else "dedup", deduplicate,
                 before, priority=5, cached=lambda k=key: processor.available(k, "accepted") or known(k, "dedup"))
             before = [dedup]
         add(key, "accepted", "filter", lambda k=key: processor.ensure_accepted(k), before, priority=6,
@@ -113,8 +143,15 @@ def graph(rt, processor, matrices):
     for key, entity in entities.items():
         before = [f"{key}/accepted"] if entity.get("contact_processing", True) else [f"{key}/sorted"]
         if entity.get("contact_processing", True):
-            stats = add(key, "stats", "report", lambda k=key: None if entities[k].get("alias_of") else processor.stats(k), before, priority=8)
-            before = [stats]
+            stats_before = list(before)
+            if entity["kind"] == "pool" and not entity.get("legacy_pool") and c["POOL_STATS_MODE"] == "merge":
+                stats_before += [f"{unit}/stats" for unit in entity["units"] if unit in entities]
+            stats = add(key, "stats", "report", lambda k=key: None if entities[k].get("alias_of") else processor.stats(k), stats_before, priority=8)
+            # Full descriptive statistics may overlap product generation, but
+            # remain required before this entity can be declared finished.
+            required_stats = [stats]
+        else:
+            required_stats = []
         if builds_matrices(entity, c):
             matrix = add(key, "matrix", "matrix", lambda k=key: matrices.build(entities[k], processor.keys[k]["accepted"], kind="matrix"), before, priority=10)
             before = [matrix]
@@ -125,7 +162,7 @@ def graph(rt, processor, matrices):
                 before = [add(key, "downstream", "downstream", analyze, before, priority=12)]
             if builds_hic(entity, c):
                 hic = add(key, "hic", "hic", lambda k=key: matrices.build(entities[k], processor.keys[k]["accepted"], kind="hic"),
-                          [f"{key}/stats"], priority=11)
+                          [f"{key}/accepted"], priority=11)
                 before.append(hic)
         def finish(k=key):
             e = entities[k]
@@ -137,7 +174,7 @@ def graph(rt, processor, matrices):
                     rt.warn(f"{k}: MultiQC failed: {exc}")
                     e["partial_success"] = True
             write_status(rt, e, "partial_success" if e.get("partial_success") else "success")
-        add(key, "finished", "report", finish, before, priority=15)
+        add(key, "finished", "report", finish, [*before, *required_stats], priority=15)
     return list(tasks.values())
 
 
@@ -162,8 +199,9 @@ def execute_stages(rt, processor, matrices):
             from pipeline import log
             log(f"{event['task']}: {event['state']} ({event['cpus']} CPU slots; {event['memory_gib']:.1f} GiB reservation)")
     profile = resource_profile(rt.c)
+    profile["max_prepared_bytes"] = int(float(rt.c["MAX_PREPARED_GB"]) * 1024**3)
     rt.plan["resource_profile"] = profile
-    scheduler = StageScheduler(profile, rt.stop, notify)
+    scheduler = StageScheduler(profile, rt.stop, notify, rt.guard)
     tasks = graph(rt, processor, matrices)
     scheduler.validate(tasks)  # fail before any scientific stage starts
     json_write(metadata / "resource_plan.json", {**profile, "reservations": {

@@ -1,5 +1,39 @@
 # Changelog
 
+## 3.0.0-rc6 - bounded streaming and recovery (2026-11-04)
+
+- Fuse sorted-input merging and joint library deduplication without a complete
+  merged intermediate by default. Keep materialized mode and reuse completed
+  merge checkpoints. Preserve backend, metric, mismatch, chunk/carryover and
+  GNU comparison/tie ordering; never deduplicate independent libraries together.
+- Replace asynchronous unverified merge readers with explicitly waited POSIX
+  readers, CRC checks, per-input receipts, bounded active decompression, and
+  exact merged-input/dedup-total reconciliation. More than eight inputs can
+  still require explicitly placed GNU merge scratch.
+- Add bounded vectorized filtering with the scalar RC5 predicate retained as
+  an equivalence oracle. Preserve restriction/distance rules and rejection QC.
+- Export identical Juicer short-format contacts through a monitored subprocess
+  and parallel configurable bgzip, retaining a restartable export checkpoint.
+- Merge compatible accepted-pair statistics and build final Cooler from verified
+  disjoint constituent integer counts where available; scan/bin pairs as the
+  fallback. Rebalance pooled counts anew and retain the accepted pairs for hic.
+- Allow matrices/export to overlap descriptive statistics while requiring QC
+  before entity completion. Preserve the final biological-completion barrier.
+- Add explicit --resume-checkpoints for managed runs with deleted FASTQs,
+  recorded upstream lineage, exact RC5 fingerprint migration, and archived prior
+  run plans. Keep original scientific artifacts/provenance unchanged on reuse.
+- Add durable per-generation publication journals, owned transfer paths,
+  filesystem-device reservations, estimated prepared-input byte limits,
+  scratch ceilings and optional summed process-tree RSS monitoring.
+- Collect sorted-record counts/logical digests during existing writes rather
+  than an extra full read. Validate accepted-pair and raw-matrix totals.
+- Update the optional large-server profile to two 50-thread aligners, bounded
+  merge decoders, 96-GiB joint-stage reservations and 400-GiB aggregate admission.
+  Resource settings remain estimates/polling safeguards, not hard quotas.
+- Add focused scientific-equivalence, CRC/failure, publication, missing-input,
+  restart and storage tests. No production-data reruns or speedup guarantee.
+- No server environment/package/index changes or automatic server promotion.
+
 ## 3.0.0-rc5 - integrated performance update (2026-10-29)
 
 - Replaced whole-sample batches and global sample/library barriers with a

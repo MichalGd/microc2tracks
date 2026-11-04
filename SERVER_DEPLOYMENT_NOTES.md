@@ -1,5 +1,15 @@
 # Server Deployment Notes
 
+## RC6 bounded-streaming update, 2026-11-04
+
+Stage the complete RC6 source under `/opt/microc2tracks/versions/3.0.0-rc6` and add
+only a version-specific `microc2tracks-rc6` launcher initially. Keep RC5, running
+jobs, the default command, shared environment, JAR and production indexes unchanged.
+Follow [the RC6 guide](docs/18_rc6_streaming_recovery_and_storage.md) and current
+`TEST_REPORT.md`. Publishing a GitHub tag does not install or promote the server.
+Run the focused synthetic server tests with existing tools before promotion.
+No new scientific runtime dependency was introduced.
+
 ## RC5 performance update, 2026-10-29
 
 Stage the complete RC5 archive at `/opt/microc2tracks/versions/3.0.0-rc5` with a

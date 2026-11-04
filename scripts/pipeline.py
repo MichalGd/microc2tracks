@@ -26,6 +26,7 @@ from pairs_processing import PairProcessor, proof_path, read_proof, validate_poo
 from reference_registry import Registry
 from stage_scheduler import StageScheduler, Task, reservation, resource_profile
 from rc4_compatibility import enable as enable_rc4, translate as translate_rc4
+from rc5_compatibility import enable as enable_rc5
 from run_plan import artifact_paths, build_plan, resolve_roots
 from workflow_common import ROOT, VERSION, absolute, annotate_hic_outputs, builds_hic, builds_matrices, hic_targets, identity, json_write, load_config, resolve_policy, safe_id, sha256, signature, text_open, truth, tsv_write
 
@@ -51,7 +52,9 @@ def subprocess_environment(args):
 
 def storage_guard(plan):
     c = plan["settings"]
-    return StorageGuard(plan["roots"], shlex.split(c["REQUIRED_STORAGE_MOUNTS"]), float(c["MIN_FREE_OUTPUT_GB"]), float(c["MIN_FREE_SCRATCH_GB"]))
+    guard = StorageGuard(plan["roots"], shlex.split(c["REQUIRED_STORAGE_MOUNTS"]), float(c["MIN_FREE_OUTPUT_GB"]), float(c["MIN_FREE_SCRATCH_GB"]))
+    guard.scratch_budget_bytes = int(float(c["SCRATCH_BUDGET_GB"]) * 1024**3)
+    return guard
 
 
 def validate_existing_layout(plan):
@@ -114,45 +117,64 @@ def tool_versions(plan):
             versions[name] = "version query timed out"
     if not re.search(r"\b1\.1\.3\b", versions["pairtools"]):
         raise RuntimeError(f"This release targets pairtools 1.1.3; found: {versions['pairtools']}. Do not update a running production environment in place.")
+    if (matrices and c["POOL_COOLER_MODE"] == "counts" and any(e.get("biological_dependencies") for e in plan["entities"].values())
+            and not re.search(r"\b0\.10\.4\b", versions.get("cooler", ""))):
+        raise RuntimeError("Raw-count pooling is validated with Cooler 0.10.4. Use POOL_COOLER_MODE=pairs for another version; do not update a running environment in place.")
     return versions
 
 
 class Runtime:
-    def __init__(self, plan, config_path: Path, versions=None):
+    def __init__(self, plan, config_path: Path, versions=None, dry_run=False):
         self.plan, self.c = plan, plan["settings"]
+        self.dry_run = dry_run
         self.config_path = config_path.resolve()
         self.guard = storage_guard(plan)
         self.guard.check()
         self.versions = versions or tool_versions(plan)
         self.jar_identity = identity(Path(self.c["JUICER_TOOLS_JAR"]), True) if hic_targets(plan) and self.c["JUICER_TOOLS_JAR"] else {}
         scratch_root = Path(plan["roots"]["scratch"])
-        scratch_root.mkdir(parents=True, exist_ok=True)
-        self.scratch = Path(tempfile.mkdtemp(prefix="run_", dir=scratch_root))
-        json_write(self.scratch / "owner.json", {"run_id": self.scratch.name, "pid": os.getpid(), "version": VERSION})
+        if not dry_run:
+            scratch_root.mkdir(parents=True, exist_ok=True)
+        self.scratch = scratch_root / "preflight_read_only" if dry_run else Path(tempfile.mkdtemp(prefix="run_", dir=scratch_root))
+        self.guard.usage_roots = [self.scratch]
+        if not dry_run:
+            json_write(self.scratch / "owner.json", {"run_id": self.scratch.name, "pid": os.getpid(), "version": VERSION})
         plan["run_id"], plan["scratch"] = self.scratch.name, str(self.scratch)
         self.slots = {key: threading.BoundedSemaphore(int(self.c[f"MAX_PARALLEL_{key.upper()}"])) for key in ("fastp", "matrix", "hic")}
         self.digest_lock = threading.Lock()
         self.digests = {}
         self.code_hashes = {p.name: sha256(p) for p in (ROOT / "scripts").iterdir() if p.suffix in {".py", ".sh"}}
         self.compatible_keys = {}
-        self.rc4_hashes = enable_rc4(plan, self.code_hashes)
+        meta = Path(plan.get("metadata_dir", str(Path(plan["roots"]["out"]) / "run_metadata")))
+        previous = meta / "run_plan.json"
+        self.previous_plan = json.loads(previous.read_text()) if previous.is_file() else {}
+        self.rc4_hashes = enable_rc4(plan, self.code_hashes, preserve=not dry_run)
+        self.rc5_hashes = enable_rc5(plan, preserve=not dry_run)
+        self.legacy_keys = {"rc4": {}, "rc5": {}}
         self.stop = threading.Event()
         self.storage_check_lock = threading.Lock()
         self.last_storage_check = time.monotonic()
         self.warning_lock, self.warnings = threading.Lock(), []
 
     def key(self, stage, parameters, tools=(), code=()):
+        # Stage-specific transform contracts deliberately exclude resource-only
+        # source edits. A scientifically different transform must bump its stage
+        # contract, remove the corresponding legacy allowlist, and add tests.
         contract = {"stage": stage, "schema": 1, "parameters": parameters,
                           "tools": {name: self.versions.get(name, "unknown") for name in tools},
                           "libraries": {name: self.versions.get(name) for name in (
                               ["numpy", "scipy", "pandas", "pysam"] if "pairtools" in tools else
                               ["numpy", "pandas", "h5py"] if "cooler" in tools else [])},
-                          "code": {name: self.code_hashes[name] for name in ["workflow_common.py", *code]}}
+                          "code": {"scientific_contract": f"{stage}:rc6-v1"}}
         key = signature(contract)
-        if self.rc4_hashes and all(name in self.rc4_hashes for name in contract["code"]):
-            legacy = {**contract, "parameters": translate_rc4(parameters, self.compatible_keys),
-                      "code": {name: self.rc4_hashes[name] for name in contract["code"]}}
-            self.compatible_keys[key] = [signature(legacy)]
+        for version, hashes in (("rc4", self.rc4_hashes), ("rc5", self.rc5_hashes)):
+            names = ["workflow_common.py", *code]
+            if hashes and all(name in hashes for name in names):
+                legacy = {**contract, "parameters": translate_rc4(parameters, self.legacy_keys[version]),
+                          "code": {name: hashes[name] for name in names}}
+                old_key = signature(legacy)
+                self.legacy_keys[version][key] = [old_key]
+                self.compatible_keys.setdefault(key, []).append(old_key)
         return key
 
     def store(self, entity):
@@ -160,7 +182,7 @@ class Runtime:
         if self.c["PUBLIC_HIC_DIR"]:
             roots.append(Path(self.c["PUBLIC_HIC_DIR"]).resolve())
         return StageStore(Path(entity["paths"]["done"]), self.scratch / entity["id"].replace(":", "_"), roots,
-                          self.c["LARGE_OUTPUT_STAGING"], self.guard, self.compatible_keys)
+                          self.c["LARGE_OUTPUT_STAGING"], self.guard, self.compatible_keys, self.dry_run)
 
     def log(self, entity, stage):
         path = Path(entity["paths"]["logs"]) / f"{entity['name']}.{stage}.log"
@@ -174,6 +196,13 @@ class Runtime:
             with self.storage_check_lock:
                 if time.monotonic() - self.last_storage_check >= float(self.c["STORAGE_CHECK_INTERVAL"]):
                     self.guard.check()
+                    from resource_monitor import process_tree_metrics
+                    metrics = process_tree_metrics(os.getpid())
+                    limit = float(self.c["MAX_PROCESS_TREE_RSS_GB"])
+                    if limit and metrics["rss_bytes"] > limit * 1024**3:
+                        raise RuntimeError("Process-tree RSS safety limit exceeded; partials retained")
+                    metadata = Path(self.plan.get("metadata_dir", str(Path(self.plan["roots"]["out"]) / "run_metadata")))
+                    json_write(metadata / "resource_usage.json", {"time": time.time(), **metrics})
                     self.last_storage_check = time.monotonic()
 
     def _terminate(self, process):
@@ -374,6 +403,12 @@ def execute(plan, config):
         plan["tool_versions"] = rt.versions
         plan["source_hashes"] = rt.code_hashes
         plan["source_config"] = str(config.resolve())
+        processor, matrices = PairProcessor(rt), MatrixProducts(rt)
+        rt.pair_keys = processor.keys
+        plan["checkpoint_keys"] = processor.keys
+        if rt.previous_plan:
+            history = Path(plan.get("metadata_dir", str(out / "run_metadata"))) / "history" / plan["run_id"]
+            json_write(history / "previous_run_plan.json", rt.previous_plan)
         write_manifests(plan)
         meta_dir = Path(plan.get("metadata_dir", str(out / "run_metadata")))
         json_write(meta_dir / "tool_versions.json", rt.versions)
@@ -383,7 +418,6 @@ def execute(plan, config):
         effective_config = meta_dir / "effective_config.conf"
         effective_config.write_text("".join(f"{key}={shlex.quote(value)}\n" for key, value in sorted(rt.c.items())), encoding="utf-8", newline="\n")
         rt.config_path = effective_config
-        processor, matrices = PairProcessor(rt), MatrixProducts(rt)
         metadata = Path(plan.get("metadata_dir", str(out / "run_metadata")))
         report_dir = metadata / "final_report" if plan.get("manual") else out / "final_report"
         state = metadata / "run_status.json"
@@ -430,6 +464,8 @@ def export_artifacts(plan):
         if entity["kind"] in {"external", "external_sorted"}:
             continue
         for record_path in Path(entity["paths"]["done"]).glob("*.json"):
+            if record_path.name.startswith("."):
+                continue
             record = json.loads(record_path.read_text())
             for label, item in record.get("outputs", {}).items():
                 path = Path(item["path"])
@@ -446,6 +482,8 @@ def manual_plan(c, args):
     sources = [Path(p).resolve() for p in args.pairs.split(",")]
     if not sources or len(set(sources)) != len(sources) or any(not p.is_file() for p in sources):
         raise ValueError("Provide distinct existing input pair files")
+    if len(sources) > int(c["MAX_MERGE_INPUTS"]):
+        raise ValueError("Input count exceeds MAX_MERGE_INPUTS; use bounded sorted pre-merges, not independent deduplication")
     if args.mode == "pool":
         proofs = validate_pool_inputs(sources)
     elif args.mode == "joint-dedup":
@@ -526,6 +564,7 @@ def main():
         if command != "merge":
             p.add_argument("-s", "--samplesheet", type=Path, required=True)
             p.add_argument("--mode", choices=["fastq", "refilter-deduplicated"], help="Override WORKFLOW_MODE; refilter skips alignment and deduplication")
+            p.add_argument("--resume-checkpoints", action="store_true", help="Explicit managed-checkpoint recovery when FASTQs have been removed")
         else:
             p.add_argument("-n", "--name", required=True)
             p.add_argument("-r", "--reference", default="")
@@ -534,11 +573,26 @@ def main():
     args = parser.parse_args()
     try:
         c = load_config(args.config)
+        if getattr(args, "resume_checkpoints", False):
+            c["RESUME_FROM_CHECKPOINTS"] = "true"
         plan = manual_plan(c, args) if args.command == "merge" else build_plan(c, args.samplesheet, mode=args.mode)
         for warning in plan["warnings"]:
             log("WARNING: " + warning)
         if args.command == "preflight":
             validate_existing_layout(plan)
+            versions = tool_versions(plan)
+            if truth(c["RESUME_FROM_CHECKPOINTS"]):
+                preview = Runtime(plan, args.config, versions=versions, dry_run=True)
+                processor = PairProcessor(preview)
+                for key, entity in plan["entities"].items():
+                    if entity["kind"] == "pool" or not entity.get("contact_processing", True) or entity.get("input_stage") == "deduplicated":
+                        continue
+                    if processor.available(key, "accepted") or processor.available(key, "dedup") or processor.available(key, "sorted"):
+                        continue
+                    for member in entity["members"]:
+                        row_key = f"sample:{member}"
+                        if not processor.available(row_key, "sorted") and any(not Path(plan["samples"][member][field]).is_file() for field in ("fastq_r1", "fastq_r2")):
+                            raise ValueError(f"No reusable checkpoint or FASTQs for {member}")
             rc4_eligible = enable_rc4(plan, {p.name: sha256(p) for p in (ROOT / "scripts").iterdir() if p.suffix in {".py", ".sh"}}, preserve=False)
             profile = resource_profile(c)
             requested = {"report"}
@@ -562,7 +616,7 @@ def main():
                     raise ValueError(f"{kind} reservation {cpus} CPU slots/{memory:.1f} GiB exceeds global budget; adjust resources")
             print(json.dumps({"workflow_mode": plan.get("workflow_mode", "merge"), "storage": storage_guard(plan).check(), "samples": len(plan["samples"]),
                 "dedup_units": plan["dedup_units"], "pools": plan["pools"],
-                "hic_output_scope": c["HIC_OUTPUT_SCOPE"], "hic_targets": hic_targets(plan), "tool_versions": tool_versions(plan),
+                "hic_output_scope": c["HIC_OUTPUT_SCOPE"], "hic_targets": hic_targets(plan), "tool_versions": versions,
                 "resource_profile": profile, "stage_reservations": reservations,
                 "rc4_compatibility_enabled": bool(rc4_eligible),
                 "grouped_runs_without_individual_contact_processing": [key for key, e in plan["entities"].items() if not e.get("contact_processing", True)]}, indent=2))

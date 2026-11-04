@@ -172,7 +172,8 @@ class OptimizedWorkflowTests(unittest.TestCase):
         import contextlib
         stack = contextlib.ExitStack()
         stack.enter_context(patch("pipeline.tool_versions", return_value={"pairtools": "1.1.3", "cooler": "mock", "java": "mock"}))
-        stack.enter_context(patch.object(Runtime, "pipeline", lambda rt, *args, **kwargs: self.fake(rt, *args, **kwargs)))
+        from mock_rc6_transport import adapt
+        stack.enter_context(patch.object(Runtime, "pipeline", adapt(lambda rt, *args, **kwargs: self.fake(rt, *args, **kwargs))))
         stack.enter_context(patch("pipeline.log"))
         return stack
 
@@ -183,7 +184,8 @@ class OptimizedWorkflowTests(unittest.TestCase):
             entities = plan["entities"]
             dedup = [args for args in self.calls if args[:2] == ["pairtools", "dedup"]]
             self.assertEqual(len(dedup), 2)
-            self.assertTrue(all("dedup_groups" in args[-1] for args in dedup))
+            self.assertTrue(all("--chunksize" in args for args in dedup))
+            self.assertFalse(any(Path(e["paths"]["sorted"]).exists() for e in entities.values() if e["kind"] == "dedup"))
             self.assertEqual(sum(args[0] == "pairix" for args in self.calls), 3)
             self.assertEqual(hic_targets(plan), ["pool:final_selected"])
             self.assertTrue(all(not Path(e["paths"]["norm_mcool"]).exists() for e in entities.values() if e["kind"] == "sample"))
@@ -241,10 +243,10 @@ class OptimizedWorkflowTests(unittest.TestCase):
         config = load_config(ROOT / "config/server_140cpu_500gb.conf")
         with patch("stage_scheduler.available_cpus", return_value=140), patch("stage_scheduler.available_memory_gib", return_value=500):
             profile = resource_profile(config)
-        self.assertEqual(profile["cpu_budget"], 120)
+        self.assertEqual(profile["cpu_budget"], 140)
         self.assertEqual(profile["memory_gib"], 400)
         self.assertEqual(profile["limits"]["alignment"], 2)
-        self.assertEqual(config["THREADS_ALIGN"], "32")
+        self.assertEqual(config["THREADS_ALIGN"], "50")
         self.assertEqual(config["HIC_OUTPUT_SCOPE"], "final")
         self.assertEqual(size_gib("64g"), 64)
         with patch("stage_scheduler.available_cpus", return_value=140), patch("stage_scheduler.available_memory_gib", return_value=100):
@@ -256,7 +258,8 @@ class OptimizedWorkflowTests(unittest.TestCase):
         old = Runtime(plan, self.root / "config", versions={"pairtools": "1.1.3", "bwa-mem2": "mock"})
         old.code_hashes.update(RC4_HASHES)
         processor = PairProcessor(old)
-        with patch.object(Runtime, "pipeline", lambda rt, *args, **kwargs: self.fake(rt, *args, **kwargs)):
+        from mock_rc6_transport import adapt
+        with patch.object(Runtime, "pipeline", adapt(lambda rt, *args, **kwargs: self.fake(rt, *args, **kwargs))):
             processor.ensure_sorted("sample:row1")
         paths = plan["entities"]["sample:row1"]["paths"]
         originals = [Path(paths["sorted"]), proof_path(Path(paths["sorted"])), Path(paths["done"]) / "sorted.json"]

@@ -7,9 +7,13 @@ import os
 import shutil
 import time
 import uuid
+import threading
+from contextvars import ContextVar
 from pathlib import Path
 
 from workflow_common import identity, json_write, sha256
+
+PUBLICATION_TOKEN = ContextVar("publication_token", default=None)
 
 
 class FileLock:
@@ -54,6 +58,36 @@ class StorageGuard:
         self.roots, self.mounts = roots, [Path(p).resolve() for p in mounts]
         self.output_gb, self.scratch_gb = output_gb, scratch_gb
         self.devices: dict[str, int] = {}
+        self.reservations, self.reservation_lock = {}, threading.RLock()
+        self.scratch_budget_bytes = 0
+        self.usage_roots = []
+
+    def reserve(self, token, requests):
+        """Conservative per-device admission; estimates are not filesystem quotas."""
+        with self.reservation_lock:
+            report = self.check()
+            grouped, floors, free = {}, {}, {}
+            for item in report.values():
+                device = item["device"]
+                floors[device] = max(floors.get(device, 0), item["reserve_gib"] * 1024**3)
+                free[device] = item["free_bytes"]
+            for path, amount in requests.items():
+                if amount <= 0:
+                    continue
+                device = nearest_existing(Path(path)).stat().st_dev
+                grouped[device] = grouped.get(device, 0) + int(amount)
+            held = {}
+            for reservation in self.reservations.values():
+                for device, amount in reservation.items():
+                    held[device] = held.get(device, 0) + amount
+            if any(free.get(d, 0) < floors.get(d, 0) + held.get(d, 0) + n for d, n in grouped.items()):
+                return False
+            self.reservations[token] = grouped
+            return True
+
+    def release(self, token):
+        with self.reservation_lock:
+            self.reservations.pop(token, None)
 
     def check(self) -> dict:
         for mount in self.mounts:
@@ -76,6 +110,10 @@ class StorageGuard:
             if free < reserve * 1024**3:
                 raise RuntimeError(f"Insufficient free space for {key} at {value}: {free/1024**3:.2f} GiB; reserve={reserve} GiB")
             report[key] = {"path": value, "device": device, "free_bytes": free, "reserve_gib": reserve}
+        if self.scratch_budget_bytes:
+            used = sum(p.stat().st_size for root in self.usage_roots for p in root.rglob("*") if p.is_file() and not p.is_symlink())
+            if used > self.scratch_budget_bytes:
+                raise RuntimeError(f"Scratch budget exceeded: {used} bytes > {self.scratch_budget_bytes}; partials retained")
         return report
 
 
@@ -91,7 +129,7 @@ def publish(source: Path, destination: Path) -> dict:
     if same_filesystem(source, destination.parent):
         os.replace(source, destination)
     else:
-        partial = destination.with_name(f".partial.{uuid.uuid4().hex}.{destination.name}")
+        partial = destination.with_name(f".transfer.{PUBLICATION_TOKEN.get() or uuid.uuid4().hex}.{destination.name}")
         expected = sha256(source)
         shutil.copyfile(source, partial)
         if partial.stat().st_size != source.stat().st_size or sha256(partial) != expected:
@@ -112,19 +150,34 @@ def publish(source: Path, destination: Path) -> dict:
 
 
 class StageStore:
-    def __init__(self, metadata: Path, scratch: Path, roots: list[Path], staging: str, guard: StorageGuard, compatible_keys=None):
+    def __init__(self, metadata: Path, scratch: Path, roots: list[Path], staging: str, guard: StorageGuard, compatible_keys=None, read_only=False):
         self.metadata, self.scratch = metadata, scratch
         self.roots = [p.resolve() for p in roots]
         self.staging, self.guard = staging, guard
         self.compatible_keys = compatible_keys if compatible_keys is not None else {}
-        self.metadata.mkdir(parents=True, exist_ok=True)
+        self.read_only = read_only
+        if not read_only:
+            self.metadata.mkdir(parents=True, exist_ok=True)
 
     def record_path(self, stage: str) -> Path:
         return self.metadata / f"{stage}.json"
 
     def read(self, stage: str) -> dict:
         path = self.record_path(stage)
-        return json.loads(path.read_text()) if path.is_file() else {}
+        record = json.loads(path.read_text()) if path.is_file() else {}
+        journal = self.metadata / f".{stage}.publication.json"
+        if journal.is_file():
+            generation = json.loads(journal.read_text())
+            # Success written last is authoritative only for the same generation.
+            if record.get("status") != "success" or record.get("generation") != generation["generation"]:
+                outputs = dict(record.get("outputs", {}))
+                for label, expected in generation["outputs"].items():
+                    target = Path(expected["path"])
+                    if target.is_file() and identity(target) == expected:
+                        outputs[label] = expected
+                return {**record, "stage": stage, "status": "interrupted", "signature": generation["signature"],
+                        "outputs": outputs, "publication_journal": str(journal)}
+        return record
 
     def complete(self, stage: str, key: str, outputs: dict[str, Path]) -> bool:
         record = self.read(stage)
@@ -152,6 +205,8 @@ class StageStore:
         return False
 
     def run(self, stage: str, key: str, outputs: dict[str, Path], action, validate=None) -> dict:
+        if self.read_only:
+            raise RuntimeError("Read-only preflight cannot execute or publish a stage")
         with contextlib.ExitStack() as locks:
             locks.enter_context(FileLock(self.metadata / f".{stage}.lock"))
             for path in sorted(set(outputs.values())):
@@ -181,6 +236,8 @@ class StageStore:
             json_write(work / "owner.json", owner)
             started = time.time()
             published = {}
+            journal = self.metadata / f".{stage}.publication.json"
+            context_token = PUBLICATION_TOKEN.set(token)
             try:
                 if relocatable:
                     mapping = {old["outputs"][label]["path"]: str(path.resolve()) for label, path in outputs.items()}
@@ -205,15 +262,22 @@ class StageStore:
                 if validate:
                     validate(temporary)
                 self.guard.check()
+                planned = {label: {**identity(temporary[label]), "path": str(path.resolve())} for label, path in outputs.items()}
+                transfers = [str(path.with_name(f".transfer.{token}.{path.name}")) for path in outputs.values()]
+                owner["files"] += transfers
+                json_write(work / "owner.json", owner)
+                json_write(journal, {"schema": 1, "stage": stage, "signature": key, "generation": token,
+                                     "outputs": planned, "transfers": transfers, "work": str(work)})
                 for label, path in outputs.items():
                     published[label] = publish(temporary[label], path)
                 record = {"schema": 1, "signature": key, "stage": stage, "status": "success",
                           "started": started, "completed": time.time(), "outputs": published,
-                          "storage_only_republication": relocatable}
+                          "storage_only_republication": relocatable, "generation": token}
                 owner_marker = self.scratch.parent / "owner.json"
                 if owner_marker.is_file():
                     record["run_id"] = json.loads(owner_marker.read_text()).get("run_id")
                 json_write(self.record_path(stage), record)
+                journal.unlink(missing_ok=True)
                 # Only our now-empty stage directory and owner file are removed.
                 (work / "owner.json").unlink()
                 with contextlib.suppress(OSError):
@@ -233,6 +297,8 @@ class StageStore:
                 with contextlib.suppress(OSError):
                     json_write(self.record_path(stage), record)
                 raise
+            finally:
+                PUBLICATION_TOKEN.reset(context_token)
 
     def remove_owned(self, path: Path) -> bool:
         resolved = path.resolve()
