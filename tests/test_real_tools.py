@@ -27,7 +27,7 @@ from workflow_common import DEFAULTS, text_open, sha256
 class RealTools(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        missing = [p for p in ("bwa-mem2", "pairtools", "pairix", "bgzip", "cooler", "java") if not shutil.which(p)]
+        missing = [p for p in ("fastp", "bwa-mem2", "pairtools", "pairix", "bgzip", "cooler", "java") if not shutil.which(p)]
         cls.jar = Path(os.environ.get("JUICER_TOOLS_JAR", ""))
         if missing or not cls.jar.is_file():
             raise RuntimeError(f"Real-tool test requested but tools/JAR missing: {missing}; jar={cls.jar}")
@@ -56,13 +56,13 @@ class RealTools(unittest.TestCase):
     def tearDownClass(cls):
         cls.temp.cleanup()
 
-    def run_fixture(self, assay, profile):
+    def run_fixture(self, assay, profile, multiple_biological=False):
         import cooler
-        work = self.root / (assay + "_" + profile)
+        work = self.root / (assay + "_" + profile + ("_final_scope" if multiple_biological else ""))
         work.mkdir()
         sheet = work / "samples.csv"
         rows = []
-        for lane in (1, 2):
+        for lane in ((1, 2, 3, 4) if multiple_biological else (1, 2)):
             r1, r2 = work / f"part{lane}.R1.fastq", work / f"part{lane}.R2.fastq"
             with r1.open("w") as one, r2.open("w") as two:
                 for i in range(48):
@@ -74,18 +74,23 @@ class RealTools(unittest.TestCase):
                     one.write(f"@part{lane}_{i}/1\n{seq1}\n+\n{'I'*100}\n")
                     two.write(f"@part{lane}_{i}/2\n{seq2}\n+\n{'I'*100}\n")
             rows.append({"sample": f"part{lane}", "assay": assay, "reference_genome": "toy", "condition": "synthetic",
-                "biological_replicate": "1", "technical_replicate": str(lane), "fastq_r1": str(r1), "fastq_r2": str(r2), "dedup_group": "joint"})
+                "biological_replicate": str((lane+1)//2) if multiple_biological else "1", "technical_replicate": str(lane),
+                "fastq_r1": str(r1), "fastq_r2": str(r2), "dedup_group": f"library{(lane+1)//2}" if multiple_biological else "joint"})
+            if multiple_biological:
+                rows[-1].update(merge_group=f"biological{(lane+1)//2}", final_pool="final_selected")
         with sheet.open("w", newline="") as out:
             writer = csv.DictWriter(out, list(rows[0]), lineterminator="\n")
             writer.writeheader(); writer.writerows(rows)
         config = work / "config.conf"
         values = {**DEFAULTS, "OUTDIR": str(work / "out"), "REFERENCE_REGISTRY": str(self.registry), "DEFAULT_REFERENCE_ID": "toy",
             "TMPDIR": str(work / "ssd_scratch"), "PAIRS_OUTDIR": str(work / "hdd_pairs"), "MATRIX_OUTDIR": str(work / "hdd_matrices"),
-            "TRIMMED_OUTDIR": str(work / "hdd_trimmed"), "RUN_FASTP": "false", "RUN_MULTIQC": "false", "RUN_GLOBAL_MULTIQC": "false",
+            "TRIMMED_OUTDIR": str(work / "hdd_trimmed"), "RUN_FASTP": "true", "RUN_MULTIQC": "false", "RUN_GLOBAL_MULTIQC": "false",
             "RUN_PRELIM_DOWNSTREAM": "false", "RUN_MERGE_ALL_SAMPLES": "true", "HIC_PROTOCOL": profile,
             "HIC_RESTRICTION_ENZYMES": "DpnII" if profile == "restriction_hic" else "", "MIN_FREE_OUTPUT_GB": "0", "MIN_FREE_SCRATCH_GB": "0",
             "RESOLUTIONS": "1000", "MCOOL_RESOLUTIONS": "1000", "HIC_RESOLUTIONS": "1000", "JAVA_HEAP": "1g", "HIC_NORMALIZATIONS": "VC",
             "JUICER_TOOLS_JAR": str(self.jar.resolve()), "THREADS_ALIGN": "1", "THREADS_MATRIX": "1", "THREADS_SORT": "1", "THREADS_MERGE": "1", "THREADS_HIC_NORM": "1"}
+        if multiple_biological:
+            values.update(BUILD_SAMPLE_MATRICES="false", HIC_OUTPUT_SCOPE="final", RUN_MERGE_ALL_SAMPLES="false")
         import shlex
         config.write_text("".join(f"{key}={shlex.quote(str(value))}\n" for key, value in values.items()))
         run_log = work / "run.log"
@@ -94,19 +99,32 @@ class RealTools(unittest.TestCase):
         self.assertEqual(result.returncode, 0, run_log.read_text())
         plan = json.loads((work / "out/run_metadata/run_plan.json").read_text())
         for entity in plan["entities"].values():
-            if entity["kind"] in {"sample", "dedup"}:
+            if entity["kind"] in {"sample", "dedup"} or (multiple_biological and entity.get("output_role") == "biological"):
                 self.assertFalse(Path(entity["paths"]["norm_hic"]).exists())
                 self.assertFalse((Path(entity["paths"]["done"]) / "juicer.json").exists())
-        pool = plan["entities"]["pool:all_samples_merged"]
+        pool = plan["entities"]["pool:final_selected" if multiple_biological else "pool:all_samples_merged"]
         paths = pool["paths"]
         qc = json.loads(Path(paths["filter_qc"]).read_text())
         expected_count = qc["exclusive_counts"]["accepted"]
         clr = cooler.Cooler(paths["norm_mcool"] + "::resolutions/1000")
         self.assertGreater(expected_count, 0)
         self.assertEqual(clr.info["sum"], expected_count)
-        standalone = sum(json.loads(Path(plan["entities"][f"sample:part{lane}"]["paths"]["filter_qc"]).read_text())["exclusive_counts"]["accepted"] for lane in (1, 2))
-        self.assertLess(expected_count, standalone)
-        self.assertEqual(pool["units"], ["dedup:joint"])
+        if multiple_biological:
+            libraries = [plan["entities"][f"dedup:library{i}"] for i in (1, 2)]
+            self.assertEqual(expected_count, sum(json.loads(Path(e["paths"]["filter_qc"]).read_text())["exclusive_counts"]["accepted"] for e in libraries))
+            self.assertEqual(pool["units"], ["dedup:library1", "dedup:library2"])
+            for row in rows:
+                e = plan["entities"][f"sample:{row['sample']}"]
+                self.assertFalse(Path(e["paths"]["accepted"]).exists())
+                self.assertFalse(Path(e["paths"]["norm_mcool"]).exists())
+            for i in (1, 2):
+                e = plan["entities"][f"pool:biological{i}"]
+                self.assertTrue(Path(e["paths"]["norm_mcool"]).is_file())
+                self.assertEqual(e["paths"]["accepted"], libraries[i-1]["paths"]["accepted"])
+        else:
+            standalone = sum(json.loads(Path(plan["entities"][f"sample:part{lane}"]["paths"]["filter_qc"]).read_text())["exclusive_counts"]["accepted"] for lane in (1, 2))
+            self.assertLess(expected_count, standalone)
+            self.assertEqual(pool["units"], ["dedup:joint"])
         bins = clr.bins()[:]
         cooler_counts = {}
         for record in clr.pixels()[:].itertuples():
@@ -130,7 +148,7 @@ class RealTools(unittest.TestCase):
         self.assertEqual(result.returncode, 0, run_log.read_text())
         self.assertEqual(Path(paths["norm_mcool"]).stat().st_mtime_ns, before)
 
-        if assay == "hic" and profile == "restriction_hic":
+        if assay == "hic" and profile == "restriction_hic" and not multiple_biological:
             # Refilter the already jointly deduplicated stream, before cis/fragment
             # selection, without repeating alignment or deduplication.
             source = Path(plan["entities"]["dedup:joint"]["paths"]["dedup"])
@@ -178,6 +196,9 @@ class RealTools(unittest.TestCase):
 
     def test_tiny_dovetail_hic_full_workflow(self):
         self.run_fixture("hic", "dovetail_hic")
+
+    def test_two_biological_libraries_final_only_hic(self):
+        self.run_fixture("hic", "restriction_hic", multiple_biological=True)
 
     def test_single_joint_pass_bridge_chunk_boundary_and_independent_libraries(self):
         work = self.root / "dedup_bridge"

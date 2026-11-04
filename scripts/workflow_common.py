@@ -15,7 +15,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-VERSION = "3.0.0-rc4"
+VERSION = "3.0.0-rc5"
 DEFAULTS = {
     "WORKFLOW_MODE": "fastq",
     "OUTDIR": "results", "TMPDIR": "", "PAIRS_OUTDIR": "", "MATRIX_OUTDIR": "",
@@ -37,6 +37,16 @@ DEFAULTS = {
     "PAIRTOOLS_MERGE_MEMORY": "8G", "JAVA_HEAP": "8g", "JUICER_TOOLS_JAR": "",
     "MAX_PARALLEL_SAMPLES": "1", "MAX_PARALLEL_FASTP": "1", "MAX_PARALLEL_MATRIX": "1",
     "MAX_PARALLEL_HIC": "1", "MAX_PARALLEL_MERGES": "1", "LOCK_POLL_SECONDS": "5",
+    "MAX_PARALLEL_ALIGNMENTS": "2", "MAX_PARALLEL_DEDUP": "2", "MAX_PARALLEL_FILTER": "2",
+    "MAX_PARALLEL_DOWNSTREAM": "1", "MAX_PARALLEL_REPORTS": "1", "MAX_PREPARED_SAMPLES": "4",
+    "TOTAL_CPU_BUDGET": "0", "TOTAL_MEMORY_GB": "0", "THREADS_COMPRESS": "4", "THREADS_BALANCE": "4",
+    "MIN_AVAILABLE_MEMORY_GB": "1",
+    "MEMORY_FASTP_GB": "2", "MEMORY_ALIGN_GB": "0", "MEMORY_MERGE_GB": "0",
+    "MEMORY_DEDUP_GB": "4", "MEMORY_FILTER_GB": "2", "MEMORY_MATRIX_GB": "4",
+    "MEMORY_HIC_GB": "0", "MEMORY_DOWNSTREAM_GB": "4", "MEMORY_REPORT_GB": "1",
+    "RUN_GROUPED_ROW_CONTACT_QC": "false", "REUSE_SINGLE_LIBRARY_ARTIFACTS": "true",
+    "BUILD_BIOLOGICAL_MATRICES": "false",
+    "REUSE_RC4_OUTPUTS": "true",
     "BASE_RESOLUTION": "1000", "RESOLUTIONS": "1000,5000,10000,100000",
     "MCOOL_RESOLUTIONS": "", "HIC_RESOLUTIONS": "", "HIC_NORMALIZATIONS": "VC,VC_SQRT,KR,SCALE",
     "RUN_FASTP": "true", "RUN_MCOOL": "true", "RUN_HIC": "true", "HIC_OUTPUT_SCOPE": "merged", "BUILD_SAMPLE_MATRICES": "true",
@@ -70,6 +80,8 @@ def builds_matrices(entity: dict, c: dict) -> bool:
 
 def builds_hic(entity: dict, c: dict) -> bool:
     """Output selection only: never change assay filtering or pair multiplicity."""
+    if c.get("HIC_OUTPUT_SCOPE", "merged") == "final":
+        return truth(c["RUN_HIC"]) and builds_matrices(entity, c) and entity.get("output_role") == "final"
     return truth(c["RUN_HIC"]) and builds_matrices(entity, c) and (
         c.get("HIC_OUTPUT_SCOPE", "merged") == "all" or entity["kind"] in {"pool", "dedup"})
 
@@ -82,8 +94,8 @@ def annotate_hic_outputs(plan: dict) -> dict:
     plan["hic_targets"] = hic_targets(plan)
     if truth(plan["settings"]["RUN_HIC"]) and not plan["hic_targets"]:
         plan["warnings"].append("No .hic outputs are requested by the matrix/scope settings. "
-            "HIC_OUTPUT_SCOPE=merged skips all individual rows, including singletons and refilter inputs; "
-            "choose all to generate individual .hic files, or enable intentional output merging.")
+            "HIC_OUTPUT_SCOPE=merged skips individual rows; final requires an explicit final pool. "
+            "Choose all for individual .hic files, or declare intentional output pooling.")
     return plan
 
 
@@ -135,8 +147,16 @@ def validate_config(c: dict[str, str]) -> None:
         raise ValueError("WORKFLOW_MODE must be fastq/refilter-deduplicated")
     if not c["OUTDIR"].strip():
         raise ValueError("OUTDIR must not be empty")
-    if c["HIC_OUTPUT_SCOPE"] not in {"merged", "all"}:
-        raise ValueError("HIC_OUTPUT_SCOPE must be merged/all")
+    if c["HIC_OUTPUT_SCOPE"] not in {"merged", "all", "final"}:
+        raise ValueError("HIC_OUTPUT_SCOPE must be merged/all/final")
+    for key in ("TOTAL_CPU_BUDGET", "TOTAL_MEMORY_GB"):
+        if not c[key].isdigit():
+            raise ValueError(f"{key} must be a non-negative integer (0 means automatic)")
+    for key, value in c.items():
+        if key.startswith("MEMORY_") and (not float(value) >= 0 or not float(value) < float("inf")):
+            raise ValueError(f"{key} must be finite and non-negative")
+    for key in ("REUSE_RC4_OUTPUTS", "REUSE_SINGLE_LIBRARY_ARTIFACTS"):
+        truth(c[key])
     for key in c:
         if key.startswith(("RUN_", "KEEP_", "BUILD_", "CHECK_", "CLEAN_", "FILTER_", "HIC_REMOVE_")):
             truth(c[key])
@@ -155,7 +175,7 @@ def validate_config(c: dict[str, str]) -> None:
         raise ValueError("Invalid PAIRTOOLS_WALKS_POLICY")
     if c["LARGE_OUTPUT_STAGING"] not in {"destination", "scratch"}:
         raise ValueError("LARGE_OUTPUT_STAGING must be destination/scratch")
-    for key in ("MIN_FREE_OUTPUT_GB", "MIN_FREE_SCRATCH_GB"):
+    for key in ("MIN_FREE_OUTPUT_GB", "MIN_FREE_SCRATCH_GB", "MIN_AVAILABLE_MEMORY_GB"):
         if not 0 <= float(c[key]) < float("inf"):
             raise ValueError(f"{key} must be a finite non-negative number")
     for key in ("MCOOL_RESOLUTIONS", "HIC_RESOLUTIONS"):

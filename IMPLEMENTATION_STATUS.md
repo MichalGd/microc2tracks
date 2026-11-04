@@ -1,4 +1,14 @@
-# Integrated workflow status: 3.0.0-rc4
+# Integrated workflow status: 3.0.0-rc5
+
+RC5 prepared 2026-10-29 as one performance update on top of
+`d55761095d545353d9bc099a4c17e1ff2456ae95`. Stage scheduling, library-only contact
+processing, final-only hic, explicit pool membership, resource profile, bounded
+backlog, canonical shared artifacts and checked RC4 reuse are implemented.
+See [the performance guide](docs/17_stage_scheduling_and_library_outputs.md) and
+[current verification limits](TEST_REPORT.md). RC5 has not been installed or
+promoted on the server by this preparation. Historical status follows.
+
+## Historical RC4 baseline
 
 Prepared: 2026-10-28. Base: `0ce6761` (published server-source synchronization).
 Runtime baseline: `22d10efa98a36234ab798db9096a071aff9a7c4b`.

@@ -36,6 +36,7 @@ NORMALIZED_COLUMNS = [
     "hic_protocol",
     "restriction_enzymes",
     "dedup_group",
+    "final_pool",
 ]
 VALID_ASSAYS = {"microc", "hic"}
 GZIP_SUFFIXES = {".gz", ".gzip"}
@@ -120,6 +121,9 @@ def validate_sheet(
             hic_protocol = (row.get("hic_protocol") or "").strip().lower()
             restriction_enzymes = (row.get("restriction_enzymes") or "").strip()
             dedup_group = (row.get("dedup_group") or "").strip()
+            final_pool = (row.get("final_pool") or "").strip()
+            if final_pool and not SAFE_MERGE_GROUP.fullmatch(final_pool):
+                errors.append(f"line {line_number}: unsafe final_pool {final_pool!r}")
             if hic_protocol and hic_protocol not in {"legacy", "restriction_hic", "dovetail_hic"}:
                 errors.append(f"line {line_number}: unsupported hic_protocol {hic_protocol!r}")
             if assay == "microc" and (hic_protocol or restriction_enzymes):
@@ -250,6 +254,7 @@ def validate_sheet(
                     "hic_protocol": hic_protocol,
                     "restriction_enzymes": restriction_enzymes,
                     "dedup_group": dedup_group,
+                    "final_pool": final_pool,
                 }
             )
 

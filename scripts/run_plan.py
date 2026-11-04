@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import re
 from collections import defaultdict
@@ -74,7 +75,14 @@ def build_plan(c: dict, sheet: Path, *, check_files=True, mode: str | None = Non
         default_id = None  # every refilter row explicitly identifies its reference
     if refilter:
         rows, warnings = read_refilter_sheet(sheet)
+        # Output-selection metadata is deliberately outside the immutable RC4
+        # refilter scientific transform and its compatibility fingerprint.
+        with sheet.open(newline="", encoding="utf-8-sig") as handle:
+            final_membership = {row["sample"].strip(): (row.get("final_pool") or "").strip() for row in csv.DictReader(handle)}
         for row in rows:
+            row["final_pool"] = final_membership.get(row["sample"], "")
+            if row["final_pool"]:
+                safe_id(row["final_pool"])
             row["reference_genome"] = registry.resolve(row["reference_genome"]).reference_id
     else:
         rows, _, warnings = validate_sheet(sheet, registry, default_id, require_files=check_files,
@@ -153,6 +161,9 @@ def build_plan(c: dict, sheet: Path, *, check_files=True, mode: str | None = Non
         technical[label].append(name)
         samples[name]["resolved_merge_group"] = label
     for group, members in group_members.items():
+        biological_ids = {(samples[m]["reference_genome"], samples[m]["assay"], samples[m]["condition"], samples[m]["biological_replicate"]) for m in members}
+        if len(biological_ids) != 1:
+            raise ValueError(f"dedup_group {group} crosses biological replicates/conditions; independent libraries must remain separate")
         first = entities[f"sample:{members[0]}"]
         key = f"dedup:{group}"
         entities[key] = {**first, "id": key, "name": group, "kind": "dedup", "members": sorted(members),
@@ -176,12 +187,45 @@ def build_plan(c: dict, sheet: Path, *, check_files=True, mode: str | None = Non
                          "paths": artifact_paths(roots, f"merged/{name}", name, c)}
         pools[name] = key
 
+    explicit_final = defaultdict(list)
+    for row in samples.values():
+        if row.get("final_pool"):
+            explicit_final[row["final_pool"]].append(row["sample"])
+    if explicit_final and truth(c["RUN_MERGE_ALL_SAMPLES"]):
+        raise ValueError("Use explicit final_pool membership OR RUN_MERGE_ALL_SAMPLES, not both")
+    if explicit_final and not truth(c["RUN_MERGE_TECHNICAL_REPLICATES"]):
+        raise ValueError("Explicit final_pool needs biological outputs: set RUN_MERGE_TECHNICAL_REPLICATES=true")
     if truth(c["RUN_MERGE_TECHNICAL_REPLICATES"]):
         for name, members in technical.items():
-            if len(members) > 1:
+            selections = {samples[m].get("final_pool", "") for m in members}
+            if len(selections) > 1:
+                raise ValueError(f"final_pool must select complete biological output {name}")
+            if len(members) > 1 or truth(c["BUILD_BIOLOGICAL_MATRICES"]) or any(samples[m].get("final_pool") for m in members):
                 add_pool(name, members, "technical")
     if truth(c["RUN_MERGE_ALL_SAMPLES"]) and len(samples) > 1:
         add_pool(c["ALL_SAMPLES_MERGE_NAME"], list(samples), "all_samples")
+    for name, members in explicit_final.items():
+        add_pool(name, members, "final")
+    for key, entity in entities.items():
+        entity["output_role"] = ("final" if entity.get("pool_type") in {"final", "all_samples"} else
+                                 "biological" if entity["kind"] == "pool" else
+                                 "library" if entity["kind"] == "dedup" else "run")
+        entity["contact_processing"] = not (entity["kind"] == "sample" and entity["dedup_group"] and not refilter
+            and not truth(c["BUILD_SAMPLE_MATRICES"]) and not truth(c["RUN_GROUPED_ROW_CONTACT_QC"]))
+        if (entity["kind"] == "pool" and entity["output_role"] == "biological" and len(entity["units"]) == 1
+                and truth(c["REUSE_SINGLE_LIBRARY_ARTIFACTS"])):
+            entity["alias_of"] = entity["units"][0]
+            source = entities[entity["alias_of"]]
+            for label in ("accepted", "filter_qc", "chrom_sizes", "stats", "dedup_stats"):
+                entity["paths"][label] = source["paths"][label]
+    for entity in entities.values():
+        if entity.get("output_role") == "final":
+            selected = set(entity["source_rows"])
+            entity["biological_dependencies"] = [key for key, e in entities.items()
+                if e.get("output_role") == "biological" and selected.intersection(e["source_rows"])]
+            covered = {r for key in entity["biological_dependencies"] for r in entities[key]["source_rows"]}
+            # Legacy all-sample pooling also supports standalone rows.
+            entity["biological_dependencies"] += [f"sample:{r}" for r in sorted(selected - covered)]
     for key, unit in units.items():
         unit["members"].sort()
     if any(s["policy"]["profile"] == "legacy" for s in samples.values()):

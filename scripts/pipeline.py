@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import concurrent.futures
 import contextlib
 import importlib.metadata
 import json
@@ -25,12 +24,29 @@ from artifact_state import FileLock, StageStore, StorageGuard, publish
 from matrix_products import MatrixProducts
 from pairs_processing import PairProcessor, proof_path, read_proof, validate_pool_inputs, verify_proof_payload
 from reference_registry import Registry
+from stage_scheduler import StageScheduler, Task, reservation, resource_profile
+from rc4_compatibility import enable as enable_rc4, translate as translate_rc4
 from run_plan import artifact_paths, build_plan, resolve_roots
 from workflow_common import ROOT, VERSION, absolute, annotate_hic_outputs, builds_hic, builds_matrices, hic_targets, identity, json_write, load_config, resolve_policy, safe_id, sha256, signature, text_open, truth, tsv_write
 
 
 def log(message):
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}", flush=True)
+
+
+def subprocess_environment(args):
+    """Prevent process-pool workers multiplying hidden BLAS/Numba threads.
+
+    BWA/fastp/Java keep their own explicitly configured threading environment.
+    Scientific Python workers use one native-library thread per admitted process.
+    """
+    environment = os.environ.copy()
+    executable = Path(str(args[0])).name.lower()
+    if executable.startswith(("python", "pairtools", "cooler", "cooltools")) or executable in {"bash", "bash.exe"}:
+        for name in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "VECLIB_MAXIMUM_THREADS",
+                     "NUMEXPR_NUM_THREADS", "NUMEXPR_MAX_THREADS", "NUMBA_NUM_THREADS"):
+            environment[name] = "1"
+    return environment
 
 
 def storage_guard(plan):
@@ -54,6 +70,8 @@ def validate_existing_layout(plan):
             record = json.loads(record_path.read_text())
             owned.update(p["path"] for p in record.get("outputs", {}).values())
         for label in ("accepted", "sorted", "dedup", "chrom_sizes", "raw_cool", "norm_cool", "raw_mcool", "norm_mcool", "raw_hic", "norm_hic", "trim_r1", "trim_r2"):
+            if entity.get("alias_of") and label in {"accepted", "chrom_sizes"}:
+                continue  # canonical source entity is validated independently
             path = Path(paths[label])
             if path.exists() and str(path.resolve()) not in owned:
                 raise RuntimeError(f"Unowned/legacy output {path}; use a new output tree. Original files were not modified.")
@@ -116,25 +134,33 @@ class Runtime:
         self.digest_lock = threading.Lock()
         self.digests = {}
         self.code_hashes = {p.name: sha256(p) for p in (ROOT / "scripts").iterdir() if p.suffix in {".py", ".sh"}}
+        self.compatible_keys = {}
+        self.rc4_hashes = enable_rc4(plan, self.code_hashes)
         self.stop = threading.Event()
         self.storage_check_lock = threading.Lock()
         self.last_storage_check = time.monotonic()
         self.warning_lock, self.warnings = threading.Lock(), []
 
     def key(self, stage, parameters, tools=(), code=()):
-        return signature({"stage": stage, "schema": 1, "parameters": parameters,
+        contract = {"stage": stage, "schema": 1, "parameters": parameters,
                           "tools": {name: self.versions.get(name, "unknown") for name in tools},
                           "libraries": {name: self.versions.get(name) for name in (
                               ["numpy", "scipy", "pandas", "pysam"] if "pairtools" in tools else
                               ["numpy", "pandas", "h5py"] if "cooler" in tools else [])},
-                          "code": {name: self.code_hashes[name] for name in ["workflow_common.py", *code]}})
+                          "code": {name: self.code_hashes[name] for name in ["workflow_common.py", *code]}}
+        key = signature(contract)
+        if self.rc4_hashes and all(name in self.rc4_hashes for name in contract["code"]):
+            legacy = {**contract, "parameters": translate_rc4(parameters, self.compatible_keys),
+                      "code": {name: self.rc4_hashes[name] for name in contract["code"]}}
+            self.compatible_keys[key] = [signature(legacy)]
+        return key
 
     def store(self, entity):
         roots = [Path(p) for k, p in self.plan["roots"].items() if k != "scratch"]
         if self.c["PUBLIC_HIC_DIR"]:
             roots.append(Path(self.c["PUBLIC_HIC_DIR"]).resolve())
         return StageStore(Path(entity["paths"]["done"]), self.scratch / entity["id"].replace(":", "_"), roots,
-                          self.c["LARGE_OUTPUT_STAGING"], self.guard)
+                          self.c["LARGE_OUTPUT_STAGING"], self.guard, self.compatible_keys)
 
     def log(self, entity, stage):
         path = Path(entity["paths"]["logs"]) / f"{entity['name']}.{stage}.log"
@@ -181,6 +207,7 @@ class Runtime:
                     errors.flush()
                     process = subprocess.Popen(list(map(str, args)), stdin=previous,
                         stdout=out if i == len(commands)-1 else subprocess.PIPE, stderr=errors,
+                        env=subprocess_environment(args),
                         start_new_session=os.name != "nt")
                     if previous is not None:
                         previous.close()
@@ -227,20 +254,24 @@ def write_manifests(plan):
                      "merge_group": sample["resolved_merge_group"], "workflow_mode": plan.get("workflow_mode", "fastq"),
                      "input_stage": entity.get("input_stage", "fastq"), "deduplicated_pairs": sample.get("deduplicated_pairs", ""),
                      "input_members": ";".join(sample.get("input_members", [name]))})
-        tech.append({"merge_group": sample["resolved_merge_group"], "sample": name, "pairs": entity["paths"]["accepted"],
-                     "reference_id": entity["reference_id"], "dedup_unit": sample["unit"]})
+        tech.append({"merge_group": sample["resolved_merge_group"], "sample": name,
+                     "pairs": entity["paths"]["accepted" if entity.get("contact_processing", True) else "sorted"],
+                     "reference_id": entity["reference_id"], "dedup_unit": sample["unit"],
+                     "input_stage": "accepted" if entity.get("contact_processing", True) else "sorted_pre_dedup"})
     for name, key in plan["pools"].items():
         entity = plan["entities"][key]
         ref = plan["references"][entity["reference_id"]]
         merges.append({"merge_group": name, "reference_id": entity["reference_id"], "assembly": ref["assembly"],
                        "browser_preset": ref["browser_preset"], "members": ",".join(entity["members"]),
                        "dedup_units": ",".join(entity["units"]), "merge_dir": entity["paths"]["entity_dir"],
-                       "pairs_dir": entity["paths"]["pairs_dir"], "matrix_dir": entity["paths"]["matrix_dir"], "pool_type": entity["pool_type"]})
+                       "pairs_dir": entity["paths"]["pairs_dir"], "matrix_dir": entity["paths"]["matrix_dir"], "pool_type": entity["pool_type"],
+                       "accepted_pairs": entity["paths"]["accepted"], "accepted_artifact_source": entity.get("alias_of", key),
+                       "output_role": entity.get("output_role", "")})
     tsv_write(out / "sample_manifest.tsv", rows, ["sample", "assay", "reference_id", "species", "assembly", "browser_preset", "condition",
         "biological_replicate", "technical_replicate", "merge_group", "dedup_group", "hic_protocol", "restriction_enzymes", "fastq_r1", "fastq_r2", "sample_dir", "pairs_dir", "matrix_dir",
-        "workflow_mode", "input_stage", "deduplicated_pairs", "input_members"])
-    tsv_write(out / "technical_replicates.tsv", tech, ["merge_group", "sample", "pairs", "reference_id", "dedup_unit"])
-    tsv_write(out / "merge_manifest.tsv", merges, ["merge_group", "reference_id", "assembly", "browser_preset", "members", "dedup_units", "merge_dir", "pairs_dir", "matrix_dir", "pool_type"])
+        "workflow_mode", "input_stage", "deduplicated_pairs", "input_members", "final_pool"])
+    tsv_write(out / "technical_replicates.tsv", tech, ["merge_group", "sample", "pairs", "reference_id", "dedup_unit", "input_stage"])
+    tsv_write(out / "merge_manifest.tsv", merges, ["merge_group", "reference_id", "assembly", "browser_preset", "members", "dedup_units", "merge_dir", "pairs_dir", "matrix_dir", "pool_type", "output_role", "accepted_pairs", "accepted_artifact_source"])
     for key, unit in plan["dedup_units"].items():
         units.append({"dedup_unit": key, "members": ",".join(unit["members"]), "reference_id": unit["reference_id"], "profile": unit["policy"]["profile"]})
     tsv_write(out / "dedup_units.tsv", units, ["dedup_unit", "members", "reference_id", "profile"])
@@ -294,57 +325,6 @@ def downstream(rt, entity, accepted_key):
         return False
 
 
-def run_entity(rt, processor, matrices, key):
-    entity = rt.plan["entities"][key]
-    locks = sorted({str(Path(entity["paths"][p]) / ".microc2tracks.lock") for p in ("entity_dir", "pairs_dir", "matrix_dir")})
-    started, status = time.time(), "running"
-    with contextlib.ExitStack() as stack:
-        for path in locks:
-            stack.enter_context(FileLock(Path(path)))
-        def write_status(value, error=""):
-            tsv_write(Path(entity["paths"]["status"]), [{"sample": entity["name"], "merge_group": entity["name"] if entity["kind"] == "pool" else "",
-                "reference_id": entity["reference_id"], "assembly": rt.plan["references"][entity["reference_id"]]["assembly"],
-                "status": value, "start_epoch": int(started), "end_epoch": int(time.time()) if value != "running" else "",
-                "runtime_seconds": int(time.time()-started), "error": error}],
-                ["sample", "merge_group", "reference_id", "assembly", "status", "start_epoch", "end_epoch", "runtime_seconds", "error"])
-        write_status(status)
-        log(f"{key}: processing {len(entity['members'])} source member(s); profile={entity['policy']['profile']}")
-        try:
-            processor.ensure_accepted(key)
-            processor.stats(key)
-            build = builds_matrices(entity, rt.c)
-            if build:
-                matrices.build(entity, processor.keys[key]["accepted"])
-                if not downstream(rt, entity, processor.keys[key]["accepted"]):
-                    status = "partial_success"
-            if truth(rt.c["RUN_MULTIQC"]) and entity["kind"] == "sample" and shutil.which("multiqc"):
-                try:
-                    rt.command(["multiqc", "-f", entity["paths"]["entity_dir"], entity["paths"]["pairs_dir"], "-n", f"{entity['name']}.multiqc.html", "-o", entity["paths"]["qc_dir"]], rt.log(entity, "multiqc"))
-                except Exception as exc:
-                    rt.warn(f"{key}: MultiQC failed: {exc}")
-                    status = "partial_success"
-            write_status("success" if status == "running" else status)
-            log(f"{key}: finished")
-        except BaseException as exc:
-            print(f"ERROR: {key}: {exc}", file=sys.stderr, flush=True)
-            with contextlib.suppress(OSError):
-                write_status("interrupted" if isinstance(exc, (KeyboardInterrupt, InterruptedError)) else "failed", str(exc))
-            raise
-
-
-def batch(rt, keys, processor, matrices, limit):
-    with concurrent.futures.ThreadPoolExecutor(max_workers=limit) as pool:
-        futures = [pool.submit(run_entity, rt, processor, matrices, key) for key in keys]
-        try:
-            for future in concurrent.futures.as_completed(futures):
-                future.result()
-        except BaseException:
-            rt.stop.set()
-            for future in futures:
-                future.cancel()
-            raise
-
-
 def cleanup(rt):
     for entity in rt.plan["entities"].values():
         if entity["kind"] not in {"sample", "dedup", "pool"}:
@@ -356,6 +336,8 @@ def cleanup(rt):
                             ("KEEP_RAW_MCOOL", ["raw_mcool"]), ("KEEP_RAW_HIC", ["raw_hic"])):
             if not truth(rt.c[flag]):
                 remove += labels
+        if entity["kind"] == "dedup" and not truth(rt.c["KEEP_RAW_MERGED_PAIRS"]):
+            remove.append("sorted")
         if not truth(rt.c["KEEP_SINGLE_RES_COOL"]):
             remove += ["raw_cool"] + (["norm_cool"] if truth(rt.c["RUN_MCOOL"]) else [])
         if not builds_hic(entity, rt.c):
@@ -363,7 +345,14 @@ def cleanup(rt):
             # or their retained Juicer/raw inputs from earlier managed runs.
             remove = [label for label in remove if label not in {"juicer", "raw_hic"}]
         for label in remove:
-            store.remove_owned(Path(paths[label]))
+            target = Path(paths[label])
+            # A new release/config is not permission to clean up an earlier
+            # run's retained artifacts. Only this run's explicit ownership wins.
+            owned_now = any(record.get("run_id") == rt.plan["run_id"] and any(
+                item["path"] == str(target.resolve()) for item in record.get("outputs", {}).values())
+                for record in (json.loads(p.read_text()) for p in Path(paths["done"]).glob("*.json")))
+            if owned_now:
+                store.remove_owned(target)
     # A shared temp root is never recursively removed. Remove only empty directories
     # inside this UUID run, and the explicitly generated owner marker.
     if truth(rt.c["CLEAN_TMP_ON_SUCCESS"]):
@@ -405,9 +394,8 @@ def execute(plan, config):
             raise KeyboardInterrupt("Terminated; only this run's child processes will be stopped")
         signal.signal(signal.SIGTERM, interrupted)
         try:
-            batch(rt, [k for k, e in plan["entities"].items() if e["kind"] == "sample"], processor, matrices, int(rt.c["MAX_PARALLEL_SAMPLES"]))
-            batch(rt, [k for k, e in plan["entities"].items() if e["kind"] == "dedup"], processor, matrices, int(rt.c["MAX_PARALLEL_MERGES"]))
-            batch(rt, list(plan["pools"].values()), processor, matrices, int(rt.c["MAX_PARALLEL_MERGES"]))
+            from pipeline_stages import execute_stages
+            execute_stages(rt, processor, matrices)
             if truth(rt.c["RUN_GLOBAL_MULTIQC"]) and shutil.which("multiqc"):
                 try:
                     rt.command(["multiqc", "-f", str(out), "-n", "microc2tracks_multiqc.html", "-o", str(report_dir)], report_dir / "microc2tracks_multiqc.log")
@@ -515,6 +503,7 @@ def manual_plan(c, args):
             "paths": {"sorted": str(source), "accepted": str(source), "filter_qc": proofs[i].get("qc", "") if proofs else ""}}
     key = f"dedup:{name}" if args.mode == "joint-dedup" else f"pool:{name}"
     entities[key] = {"id": key, "kind": "dedup" if args.mode == "joint-dedup" else "pool", "name": name, "members": sorted(members),
+        "output_role": "library" if args.mode == "joint-dedup" else "final",
         "reference_id": ref.reference_id, "policy": policy, "units": [key] if args.mode == "joint-dedup" else source_keys,
         "dedup_group": name if args.mode == "joint-dedup" else "", "pool_type": args.mode,
         "legacy_pool": args.mode == "legacy-pool", "build_matrices": True,
@@ -550,9 +539,33 @@ def main():
             log("WARNING: " + warning)
         if args.command == "preflight":
             validate_existing_layout(plan)
+            rc4_eligible = enable_rc4(plan, {p.name: sha256(p) for p in (ROOT / "scripts").iterdir() if p.suffix in {".py", ".sh"}}, preserve=False)
+            profile = resource_profile(c)
+            requested = {"report"}
+            if plan["samples"] and plan.get("workflow_mode") == "fastq":
+                requested.add("alignment")
+                if truth(c["RUN_FASTP"]):
+                    requested.add("fastp")
+                requested.add("dedup")
+            if plan["dedup_units"] or plan["pools"]:
+                requested.add("merge")
+            requested.add("filter")
+            if any(builds_matrices(e, c) for e in plan["entities"].values()):
+                requested.add("matrix")
+                if truth(c["RUN_PRELIM_DOWNSTREAM"]):
+                    requested.add("downstream")
+            if hic_targets(plan):
+                requested.add("hic")
+            reservations = {kind: reservation(kind, c, plan) for kind in sorted(requested)}
+            for kind, (cpus, memory) in reservations.items():
+                if cpus > profile["cpu_budget"] or memory > profile["memory_gib"]:
+                    raise ValueError(f"{kind} reservation {cpus} CPU slots/{memory:.1f} GiB exceeds global budget; adjust resources")
             print(json.dumps({"workflow_mode": plan.get("workflow_mode", "merge"), "storage": storage_guard(plan).check(), "samples": len(plan["samples"]),
                 "dedup_units": plan["dedup_units"], "pools": plan["pools"],
-                "hic_output_scope": c["HIC_OUTPUT_SCOPE"], "hic_targets": hic_targets(plan), "tool_versions": tool_versions(plan)}, indent=2))
+                "hic_output_scope": c["HIC_OUTPUT_SCOPE"], "hic_targets": hic_targets(plan), "tool_versions": tool_versions(plan),
+                "resource_profile": profile, "stage_reservations": reservations,
+                "rc4_compatibility_enabled": bool(rc4_eligible),
+                "grouped_runs_without_individual_contact_processing": [key for key, e in plan["entities"].items() if not e.get("contact_processing", True)]}, indent=2))
             log("Preflight successful; no analysis launched or output files adopted")
             return 0
         return execute(plan, args.config)

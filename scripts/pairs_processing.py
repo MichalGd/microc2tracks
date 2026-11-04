@@ -64,6 +64,60 @@ class PairProcessor:
                 self.keys[key] = {"accepted": runtime.key("pool", {"members": entity["members"], "units": entity["units"],
                     "sources": [self.keys[unit]["accepted"] for unit in entity["units"]]}, ["pairtools"], ["pairs_processing.py"])}
 
+    def reusable(self, key, stage):
+        entity, keys = self.plan["entities"][key], self.keys[key]
+        paths = entity["paths"]
+        if stage == "trim":
+            if self.reusable(key, "sorted") or not truth(self.c["RUN_FASTP"]):
+                return True
+            outputs = self.trim_outputs(entity)
+        elif stage in {"sorted", "dedup", "accepted"}:
+            outputs = {"pairs": Path(paths[stage]), "provenance": proof_path(Path(paths[stage]))}
+            if stage == "dedup":
+                outputs["stats"] = Path(paths["dedup_stats"])
+            if stage == "accepted":
+                outputs.update(index=Path(paths["accepted"] + ".px2"), qc=Path(paths["filter_qc"]))
+                if entity.get("input_stage") == "deduplicated":
+                    outputs["import_qc"] = Path(paths["import_qc"])
+        else:
+            return False
+        return self.rt.store(entity).complete(stage, keys[stage], outputs)
+
+    def trim_outputs(self, entity):
+        paths = entity["paths"]
+        return {"r1": Path(paths["trim_r1"]), "r2": Path(paths["trim_r2"]),
+                "html": Path(paths["qc_dir"]) / f"{entity['name']}.fastp.html",
+                "json": Path(paths["qc_dir"]) / f"{entity['name']}.fastp.json"}
+
+    def available(self, key, stage):
+        """Read-only check for a valid checkpoint, including a storage-only move.
+
+        A move still executes under resource admission; this predicate only
+        avoids remapping prerequisites that its verified bundle can replace.
+        """
+        if self.reusable(key, stage):
+            return True
+        store = self.rt.store(self.plan["entities"][key])
+        record = store.read(stage)
+        allowed = {self.keys[key][stage], *self.rt.compatible_keys.get(self.keys[key][stage], [])}
+        return (record.get("status") == "success" and record.get("signature") in allowed
+                and bool(record.get("outputs")) and all(Path(item["path"]).is_file() and identity(Path(item["path"])) == item
+                    for item in record["outputs"].values()))
+
+    def ensure_trim(self, key):
+        entity = self.plan["entities"][key]
+        row = self.plan["samples"][entity["name"]]
+        if not truth(self.c["RUN_FASTP"]) or self.reusable(key, "sorted"):
+            return Path(row["fastq_r1"]), Path(row["fastq_r2"])
+        outputs = self.trim_outputs(entity)
+        def trim(t, work):
+            with self.rt.slots["fastp"]:
+                self.rt.command(["fastp", "-i", row["fastq_r1"], "-I", row["fastq_r2"], "-o", str(t["r1"]), "-O", str(t["r2"]),
+                    "--thread", self.c["THREADS_FASTP"], "--html", str(t["html"]), "--json", str(t["json"]), *shlex.split(self.c["FASTP_EXTRA_ARGS"])],
+                    self.rt.log(entity, "fastp"), timeout=int(self.c["FASTP_TIMEOUT_SECONDS"]) or None)
+        self.rt.store(entity).run("trim", self.keys[key]["trim"], outputs, trim)
+        return outputs["r1"], outputs["r2"]
+
     def provenance(self, entity, stage, key, data_path):
         result = {"schema": 1, "stage": stage, "signature": key, "reference_id": entity["reference_id"],
                 "assembly": self.plan["references"][entity["reference_id"]]["assembly"],
@@ -114,17 +168,7 @@ class PairProcessor:
             return destination
         row = self.plan["samples"][entity["name"]]
         ref = self.plan["references"][entity["reference_id"]]
-        r1, r2 = Path(row["fastq_r1"]), Path(row["fastq_r2"])
-        if truth(self.c["RUN_FASTP"]):
-            r1, r2 = Path(paths["trim_r1"]), Path(paths["trim_r2"])
-            trim_outputs = {"r1": r1, "r2": r2, "html": Path(paths["qc_dir"]) / f"{entity['name']}.fastp.html",
-                            "json": Path(paths["qc_dir"]) / f"{entity['name']}.fastp.json"}
-            def trim(t, work):
-                with self.rt.slots["fastp"]:
-                    self.rt.command(["fastp", "-i", row["fastq_r1"], "-I", row["fastq_r2"], "-o", str(t["r1"]), "-O", str(t["r2"]),
-                        "--thread", self.c["THREADS_FASTP"], "--html", str(t["html"]), "--json", str(t["json"]), *shlex.split(self.c["FASTP_EXTRA_ARGS"])],
-                        self.rt.log(entity, "fastp"), timeout=int(self.c["FASTP_TIMEOUT_SECONDS"]) or None)
-            store.run("trim", keys["trim"], trim_outputs, trim)
+        r1, r2 = self.ensure_trim(key)
         if truth(self.c["CHECK_TRIMMED_FASTQ_SYNC"]):
             from check_fastq_pair_names import check_pairs
             check_pairs(r1, r2)
@@ -136,7 +180,7 @@ class PairProcessor:
                  "--max-inter-align-gap", self.c["PAIRTOOLS_MAX_INTER_ALIGN_GAP"], "--max-molecule-size", self.c["PAIRTOOLS_MAX_MOLECULE_SIZE"],
                  "--report-alignment-end", "5", "--drop-sam", "--drop-seq", "--add-columns", "mapq"],
                 ["pairtools", "sort", "--nproc", self.c["THREADS_SORT"], "--memory", self.c["PAIRTOOLS_SORT_MEMORY"], "--tmpdir", str(work)],
-                ["bgzip", "-@", self.c["THREADS_SORT"]]], t["pairs"], self.rt.log(entity, "align_parse_sort"))
+                ["bgzip", "-@", self.c["THREADS_COMPRESS"]]], t["pairs"], self.rt.log(entity, "align_parse_sort"))
             self.write_proof(t, entity, "sorted", keys["sorted"], destination)
         store.run("sorted", keys["sorted"], outputs, align)
         return destination
@@ -146,7 +190,7 @@ class PairProcessor:
             shutil.copyfile(sources[0], destination)
         else:
             self.rt.pipeline([["pairtools", "merge", "--nproc", self.c["THREADS_MERGE"], "--memory", self.c["PAIRTOOLS_MERGE_MEMORY"],
-                               "--tmpdir", str(work), *map(str, sources)], ["bgzip", "-@", self.c["THREADS_SORT"]]],
+                               "--tmpdir", str(work), *map(str, sources)], ["bgzip", "-@", self.c["THREADS_COMPRESS"]]],
                              destination, self.rt.log(entity, "merge"))
 
     def ensure_dedup(self, key):
@@ -162,7 +206,7 @@ class PairProcessor:
         def dedup(t, work):
             self.rt.pipeline([["pairtools", "dedup", "--backend", self.c["DEDUP_BACKEND"], "--method", self.c["DEDUP_METHOD"],
                 "--max-mismatch", self.c["DEDUP_MAX_MISMATCH"], "--chunksize", self.c["DEDUP_CHUNKSIZE"], "--carryover", self.c["DEDUP_CARRYOVER"],
-                "--output-stats", str(t["stats"]), str(source)], ["bgzip", "-@", self.c["THREADS_SORT"]]], t["pairs"], self.rt.log(entity, "dedup"))
+                "--output-stats", str(t["stats"]), str(source)], ["bgzip", "-@", self.c["THREADS_COMPRESS"]]], t["pairs"], self.rt.log(entity, "dedup"))
             self.write_proof(t, entity, "dedup", keys["dedup"], destination)
         store.run("dedup", keys["dedup"], outputs, dedup)
         return destination
@@ -181,6 +225,10 @@ class PairProcessor:
 
     def ensure_accepted(self, key):
         entity, keys = self.plan["entities"][key], self.keys[key]
+        if entity.get("alias_of"):
+            source = self.plan["entities"][entity["alias_of"]]
+            validate_pool_inputs([Path(source["paths"]["accepted"])])
+            return Path(source["paths"]["accepted"])
         paths, store = entity["paths"], self.rt.store(entity)
         destination = Path(paths["accepted"])
         outputs = {"pairs": destination, "index": Path(str(destination) + ".px2"),
@@ -204,7 +252,7 @@ class PairProcessor:
                     ref = self.plan["references"][entity["reference_id"]]
                     self.rt.pipeline([[sys.executable, str(ROOT / "scripts/filter_contact_pairs.py"), "--input", str(raw),
                         "--policy", str(policy_file), "--chrom-sizes", ref["chrom_sizes"], "--matrix-chrom-sizes", paths["chrom_sizes"],
-                        "--qc", str(t["qc"]), "--legacy-pool"], ["bgzip", "-@", self.c["THREADS_SORT"]]], t["pairs"], self.rt.log(entity, "legacy_chromosome_filter"))
+                        "--qc", str(t["qc"]), "--legacy-pool"], ["bgzip", "-@", self.c["THREADS_COMPRESS"]]], t["pairs"], self.rt.log(entity, "legacy_chromosome_filter"))
                 else:
                     self.merge(sources, t["pairs"], entity, work)
                     source_qc = [json.loads(Path(self.plan["entities"][unit]["paths"]["filter_qc"]).read_text()) for unit in entity["units"]]
@@ -244,7 +292,7 @@ class PairProcessor:
                     commands = [[sys.executable, str(ROOT / "scripts/refilter_inputs.py"), "--input", str(source),
                         "--chrom-sizes", ref["chrom_sizes"], "--expected-identity", str(expected), "--qc", str(t["import_qc"])], command,
                         ["pairtools", "sort", "--nproc", self.c["THREADS_SORT"], "--memory", self.c["PAIRTOOLS_SORT_MEMORY"], "--tmpdir", str(work)]]
-                commands.append(["bgzip", "-@", self.c["THREADS_SORT"]])
+                commands.append(["bgzip", "-@", self.c["THREADS_COMPRESS"]])
                 self.rt.pipeline(commands, t["pairs"], self.rt.log(entity, "filter"))
                 if imported:
                     validate_snapshot(row)

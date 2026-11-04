@@ -1,4 +1,20 @@
-# Server Deployment Notes: 3.0.0-rc4
+# Server Deployment Notes
+
+## RC5 performance update, 2026-10-29
+
+Stage the complete RC5 archive at `/opt/microc2tracks/versions/3.0.0-rc5` with a
+new `microc2tracks-rc5` launcher; leave RC4 and the default command untouched.
+Reuse the existing environment/JAR/references/indexes read-only. Do not copy a
+subset of changed Python files into an active installation.
+
+Run the regression suite and the extended five-test opt-in real-tool suite before
+promotion; RC4's earlier successful scientific tests do not certify changed RC5
+orchestration. Use the [performance upgrade guide](docs/17_stage_scheduling_and_library_outputs.md)
+for configuration, RC4 checkpoint eligibility and a controlled later handover.
+No automatic installer, signal to a running job, default symlink replacement,
+package update or production analysis is performed by preparing this release.
+
+## Historical RC4 staging notes
 
 RC4 passed the user-reported Linux validation on 2026-10-28: 63 regressions and
 all four tiny scientific tests succeeded using the existing environment.

@@ -43,6 +43,12 @@ def contact(name, p1=10, p2=20, c1="scaffoldA", c2="scaffoldA", s1="+", s2="-", 
 
 class IntegrationFeatures(unittest.TestCase):
     def setUp(self):
+        # Mocked scientific commands are not a performance test of the host.
+        # Give scheduler tests a deterministic virtual machine budget.
+        for target, value in (("stage_scheduler.available_cpus", 256), ("stage_scheduler.available_memory_gib", 256)):
+            fixture_patch = patch(target, return_value=value)
+            fixture_patch.start()
+            self.addCleanup(fixture_patch.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name).resolve()
         self.c = {**DEFAULTS, "OUTDIR": str(self.root / "out"), "DEFAULT_REFERENCE_ID": "toy",
@@ -194,7 +200,7 @@ class IntegrationFeatures(unittest.TestCase):
         self.rows[1]["biological_replicate"] = "2"
         self.rows[1]["technical_replicate"] = "3"
         self.write_sheet()
-        with self.assertRaisesRegex(ValueError, "only part"):
+        with self.assertRaisesRegex(ValueError, "only part|crosses biological"):
             build_plan(self.c, self.sheet)
         self.rows[0]["dedup_group"] = ".."
         self.write_sheet()

@@ -21,6 +21,7 @@ microc2tracks/
     samplesheet_hic_example.csv
     samplesheet_refilter_example.csv
     samplesheet_template.csv
+    server_140cpu_500gb.conf
   docs/
     01_analysis_and_design.md
     02_installation_server.md
@@ -38,6 +39,7 @@ microc2tracks/
     14_shared_multiuser_installation.md
     15_merged_hic_outputs.md
     16_default_promotion.md
+    17_stage_scheduling_and_library_outputs.md
     README.md
   environment.yml
   envs/
@@ -47,6 +49,7 @@ microc2tracks/
     run_hic_example.sh
     run_microc_example.sh
     run_refilter_deduplicated_example.sh
+    samplesheet_library_final.csv
   scripts/
     artifact_state.py
     call_tads_from_insulation.py
@@ -62,10 +65,12 @@ microc2tracks/
     package_browser_tracks.py
     pairs_processing.py
     pipeline.py
+    pipeline_stages.py
     plot_ps_curves.py
     preflight_check.sh
     prepare_reference.sh
     prepare_restriction_fragments.py
+    rc4_compatibility.py
     reference_registry.py
     reference_sentinel.sh
     refilter_inputs.py
@@ -73,17 +78,19 @@ microc2tracks/
     run_plan.py
     sanitize_text_inputs.py
     shared_launcher.sh
+    stage_scheduler.py
     summarize_run.py
     validate_pairs_reference.py
     validate_samplesheet.py
     workflow_common.py
   tests/
     check_bash_syntax.sh
-    test_integration_features.py
     test_hic_output_scope.py
+    test_integration_features.py
     test_multireference.py
     test_real_tools.py
     test_reference_sentinel.sh
     test_refilter_mode.py
     test_server_hotfixes.py
     test_shared_installation.py
+    test_stage_performance.py

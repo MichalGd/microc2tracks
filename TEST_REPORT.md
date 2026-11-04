@@ -1,5 +1,44 @@
 # Test Report
 
+## RC5 performance update preparation: 2026-10-29
+
+Runtime candidate: `3.0.0-rc5`, implemented on the clean RC4 default commit
+`d55761095d545353d9bc099a4c17e1ff2456ae95`. This section supersedes older
+verification claims for the new candidate; the historical RC4 evidence below is
+not being presented as a scientific-tool pass for changed RC5 orchestration.
+
+- Full local regression discovery: **79 tests; 74 passed, five opt-in real-tool
+  tests skipped** on Windows using
+  the existing local Python and Git Bash. Skips are not passes.
+- New focused checks cover independent ready alignment admission while two
+  downstream jobs are blocked, CPU/RAM caps, prepared-input backlog, dependency
+  readiness, oversized/cyclic task rejection, failure cancellation/credit release,
+  subprocess cancellation preserving an unrelated process, one joint dedup per
+  library, independent biological/library multiplicity, canonical accepted-file
+  reuse, exact output inventory, final biological completion barrier and resume.
+- Checked exact-fingerprint RC4 sorted checkpoint reuse without changing its
+  original data/provenance/completion-record bytes or mtimes. Changed mapping
+  settings, tool versions, input identities and failed markers reject reuse.
+- Native-thread environment checks bound scientific Python worker pools while
+  retaining BWA's own threading environment.
+- Tested the large-server profile and singleton biological outputs. Existing
+  filter, enzyme, reference, storage, refilter, output-scope, ownership and restart
+  tests remain included. In-process mocked refilter stdin is serialized because
+  actual production subprocesses have independent stdin streams.
+- All shipped shell runners/examples pass Bash syntax checks. These tests do
+  not establish production throughput or peak RSS.
+- Five opt-in scientific tests now include fastp and a new two-biological-library
+  final-only-hic fixture, alongside Micro-C, generic restriction Hi-C, original
+  Dovetail Hi-C, and the pinned dedup chunk-boundary behavior. They compare raw
+  Cooler pixels with Juicer observed/NONE contacts and test restart.
+
+**Not yet verified:** RC5 with the actual Linux scientific binaries. This local
+Windows preparation does not have the working biolserv environment. Run the
+small opt-in suite after staging RC5 separately and before switching the default
+launcher. No production FASTQs, shared environment, genomic indices, installed
+release, server permissions or active analyses were changed during preparation.
+See [the performance guide](docs/17_stage_scheduling_and_library_outputs.md).
+
 ## Linux server validation and default promotion: 2026-10-28
 
 Evidence: user-supplied terminal output from `biolserv`, not direct remote

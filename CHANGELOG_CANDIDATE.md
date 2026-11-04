@@ -1,5 +1,43 @@
 # Changelog
 
+## 3.0.0-rc5 - integrated performance update (2026-10-29)
+
+- Replaced whole-sample batches and global sample/library barriers with a
+  dependency-ready stage dispatcher. Alignment, trimming, merge, dedup/filter,
+  matrix, hic, downstream and reporting have separate limits and global CPU/RAM
+  admission. Ready tasks waiting on resources occupy no execution worker.
+- Added explicit whole-pipeline CPU reservations, estimated RAM reservations,
+  affinity/cgroup-v2 CPU allowance detection, available-RAM waiting, prepared
+  input backlog bounds and stage/event/resource reporting. MAX_PARALLEL_SAMPLES
+  remains accepted but is no longer the alignment-concurrency control.
+- Bounded hidden native BLAS/OpenMP/Numba threads inside scientific Python
+  workers without overriding BWA/fastp/Java threading settings.
+- Added an optional 140-thread/500-GB profile: two 32-thread aligners, 120 CPU
+  slots/400 GiB admission, unchanged scientific preprocessing/filter parameters.
+- Grouped run-only inputs can stop at original sorted pairs, avoiding redundant
+  individual dedup/filter/index/stats. Joint dedup still consumes original streams
+  once per explicit library; no deduplication is added across independent libraries.
+- Added explicit final_pool CSV membership, full biological-group validation,
+  biological output support for single-run groups, and HIC_OUTPUT_SCOPE=final.
+  Final pooling waits for selected biological outputs; each format normalizes
+  the same pooled accepted contacts independently.
+- Single-library biological matrices reference canonical accepted pairs rather
+  than copying/reindexing them. Existing disjointness/policy checks remain.
+- Added separate compression/balancing thread settings; explicitly forwards
+  Cooler zoomify balancing nproc instead of assuming zoomify -p controls it.
+- Release newly generated disposable trims after alignment, and merged original
+  library streams after successful dedup when KEEP_RAW_MERGED_PAIRS=false.
+  Keep original per-run sorted streams according to KEEP_SORTED_PAIRS. Cleanup
+  never gains permission to remove an earlier run's retained artifacts.
+- Added narrowly allowlisted RC4 source-contract compatibility. Completion keys,
+  scientific parameters/tool versions and physical payload records must match;
+  original RC4 data/provenance/records are not rewritten just to mark reuse.
+- Added focused concurrency, budgets, backlog, cancellation, grouped-output,
+  cross-library, final-barrier, scope and RC4-reuse tests. Extended the opt-in
+  tiny real-tool suite with fastp and two biological libraries/final-only hic.
+- No new scientific dependencies, environment changes or production index builds.
+  Local preparation does not install/promote RC5 or change a running server job.
+
 ## 3.0.0-rc4 - validated default (2026-10-28)
 
 - Published the integrated workflow as the repository default, retaining the

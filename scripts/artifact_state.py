@@ -112,10 +112,11 @@ def publish(source: Path, destination: Path) -> dict:
 
 
 class StageStore:
-    def __init__(self, metadata: Path, scratch: Path, roots: list[Path], staging: str, guard: StorageGuard):
+    def __init__(self, metadata: Path, scratch: Path, roots: list[Path], staging: str, guard: StorageGuard, compatible_keys=None):
         self.metadata, self.scratch = metadata, scratch
         self.roots = [p.resolve() for p in roots]
         self.staging, self.guard = staging, guard
+        self.compatible_keys = compatible_keys if compatible_keys is not None else {}
         self.metadata.mkdir(parents=True, exist_ok=True)
 
     def record_path(self, stage: str) -> Path:
@@ -127,7 +128,7 @@ class StageStore:
 
     def complete(self, stage: str, key: str, outputs: dict[str, Path]) -> bool:
         record = self.read(stage)
-        if record.get("signature") != key or record.get("status") != "success":
+        if record.get("signature") not in {key, *self.compatible_keys.get(key, [])} or record.get("status") != "success":
             return False
         for label, path in outputs.items():
             saved = record.get("outputs", {}).get(label, {})
@@ -209,6 +210,9 @@ class StageStore:
                 record = {"schema": 1, "signature": key, "stage": stage, "status": "success",
                           "started": started, "completed": time.time(), "outputs": published,
                           "storage_only_republication": relocatable}
+                owner_marker = self.scratch.parent / "owner.json"
+                if owner_marker.is_file():
+                    record["run_id"] = json.loads(owner_marker.read_text()).get("run_id")
                 json_write(self.record_path(stage), record)
                 # Only our now-empty stage directory and owner file are removed.
                 (work / "owner.json").unlink()

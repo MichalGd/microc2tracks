@@ -19,6 +19,7 @@ config/samplesheet_example.csv
 config/samplesheet_hic_example.csv
 config/samplesheet_refilter_example.csv
 config/samplesheet_template.csv
+config/server_140cpu_500gb.conf
 docs/01_analysis_and_design.md
 docs/02_installation_server.md
 docs/03_inputs_and_config.md
@@ -35,6 +36,7 @@ docs/13_refilter_deduplicated_inputs.md
 docs/14_shared_multiuser_installation.md
 docs/15_merged_hic_outputs.md
 docs/16_default_promotion.md
+docs/17_stage_scheduling_and_library_outputs.md
 docs/README.md
 environment.yml
 envs/downstream_optional.yml
@@ -42,6 +44,7 @@ examples/run_dovetail_hic_example.sh
 examples/run_hic_example.sh
 examples/run_microc_example.sh
 examples/run_refilter_deduplicated_example.sh
+examples/samplesheet_library_final.csv
 scripts/artifact_state.py
 scripts/call_tads_from_insulation.py
 scripts/check_fastq_pair_names.py
@@ -56,10 +59,12 @@ scripts/microc2tracks.sh
 scripts/package_browser_tracks.py
 scripts/pairs_processing.py
 scripts/pipeline.py
+scripts/pipeline_stages.py
 scripts/plot_ps_curves.py
 scripts/preflight_check.sh
 scripts/prepare_reference.sh
 scripts/prepare_restriction_fragments.py
+scripts/rc4_compatibility.py
 scripts/reference_registry.py
 scripts/reference_sentinel.sh
 scripts/refilter_inputs.py
@@ -67,16 +72,18 @@ scripts/run_downstream.sh
 scripts/run_plan.py
 scripts/sanitize_text_inputs.py
 scripts/shared_launcher.sh
+scripts/stage_scheduler.py
 scripts/summarize_run.py
 scripts/validate_pairs_reference.py
 scripts/validate_samplesheet.py
 scripts/workflow_common.py
 tests/check_bash_syntax.sh
-tests/test_integration_features.py
 tests/test_hic_output_scope.py
+tests/test_integration_features.py
 tests/test_multireference.py
 tests/test_real_tools.py
 tests/test_reference_sentinel.sh
 tests/test_refilter_mode.py
 tests/test_server_hotfixes.py
 tests/test_shared_installation.py
+tests/test_stage_performance.py

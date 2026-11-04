@@ -4,7 +4,31 @@
 
 The first implementation follows the style of the existing Shell repositories `fastq2tracks` and `rnaseq2tracksP`: a top-level runner, `config/`, `docs/`, `examples/`, `scripts/`, `environment.yml`, and simple tests.
 
-Version **3.0.0-rc4** implements integrated restriction Hi-C, user-selected joint
+Version **3.0.0-rc5** adds dependency-ready stage scheduling and library-first
+contact processing to the integrated Micro-C/Hi-C workflow. It is a complete
+performance-update candidate, not a change to the running server installation.
+See the [performance and upgrade guide](docs/17_stage_scheduling_and_library_outputs.md)
+and the [current test report](TEST_REPORT.md) before deploying.
+
+For a 140-thread / 500-GB server, the optional
+[`server_140cpu_500gb.conf`](config/server_140cpu_500gb.conf) profile supplies two
+32-thread alignments, independent stage limits, a 120-CPU / 400-GiB admission
+budget and bounded prepared-input backlog. Copy its settings into your project
+config; no new environment, packages or production genome indexes are required.
+These are starting reservations, not measured speed/RSS guarantees or a
+server-wide scheduler across unrelated users.
+
+With `BUILD_SAMPLE_MATRICES=false`, grouped runs keep fastp/mapping QC and
+original sorted pairs but skip individual contact processing unless
+`RUN_GROUPED_ROW_CONTACT_QC=true`. One joint deduplication/filter pass is made
+per explicit `dedup_group`. Biological `.mcool` outputs can reference their
+single library's accepted artifact without copying it. Optional `final_pool`
+CSV membership selects final aggregates; `HIC_OUTPUT_SCOPE=final` exports
+`.hic` only there. Independent libraries are pooled without deduplication.
+The [small example CSV](examples/samplesheet_library_final.csv) illustrates this
+using the existing sample-sheet/config format, not another required helper.
+
+RC4 already implemented integrated restriction Hi-C, user-selected joint
 deduplication, disjoint pooling and optional output disks. Read the
 [integration/storage guide](docs/12_integrated_hic_and_storage.md) before upgrading.
 It preserves the [earlier server fixes](docs/11_server_baseline_sync.md).
@@ -12,9 +36,8 @@ On 2026-10-28, user-supplied Linux server logs confirmed 63 regression tests and
 all four tiny real-tool tests passed using the existing environment. See
 [the test report](TEST_REPORT.md) for the tested scope and limitations, and
 [default-command promotion](docs/16_default_promotion.md) to make this installed
-version the shared `microc2tracks` command. The `rc4` identifier is retained to
-match the exact runtime tested; new datasets still need reviewed configuration
-and preflight.
+version the shared `microc2tracks` command. Those historical server results apply
+to RC4, not RC5; the extended RC5 real-tool suite must pass before promotion.
 
 Existing mapped, deduplicated `.pairs`/`.pairs.gz` can be reprocessed with
 `--mode refilter-deduplicated`, skipping alignment and deduplication. See the
@@ -42,7 +65,7 @@ flowchart LR
   A["Sample sheet<br/>paired FASTQ + reference_genome"] --> B["fastp<br/>QC + trimming"]
   B --> C["bwa-mem2<br/>Hi-C/Micro-C alignment"]
   C --> D["pairtools parse/sort<br/>retained original sorted pairs"]
-  D --> Q["Independent per-row dedup"]
+  D --> Q["Optional independent per-row dedup<br/>skipped for grouped run-only inputs"]
   Q --> E{"Assay profile"}
   E -->|"Micro-C"| F["MAPQ filter<br/>near-diagonal cis filter"]
   E -->|"Hi-C"| G["MAPQ + optional cis filter<br/>profile-specific restriction classification"]
@@ -68,7 +91,10 @@ flowchart LR
 
 ## What It Produces
 
-For each sample-sheet row, interpreted as one technical replicate:
+In the backwards-compatible individual-product configuration, each sample-sheet
+row is processed independently. In the optimized grouped configuration, the
+contact and matrix products below belong to library/biological outputs, not
+every sequencing run:
 
 - `fastp` QC, with trimmed FASTQ kept only if configured
 - deduplicated `.pairs.gz` contacts

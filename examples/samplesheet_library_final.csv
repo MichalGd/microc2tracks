@@ -1,0 +1,5 @@
+sample,assay,reference_genome,condition,biological_replicate,technical_replicate,fastq_r1,fastq_r2,merge_group,hic_protocol,restriction_enzymes,dedup_group,final_pool
+bio1_run1,hic,mm39,condition_A,1,1,/data/bio1_run1_R1.fastq.gz,/data/bio1_run1_R2.fastq.gz,bio1,restriction_hic,DpnII,library1,condition_A_final
+bio1_run2,hic,mm39,condition_A,1,2,/data/bio1_run2_R1.fastq.gz,/data/bio1_run2_R2.fastq.gz,bio1,restriction_hic,DpnII,library1,condition_A_final
+bio2_run1,hic,mm39,condition_A,2,1,/data/bio2_run1_R1.fastq.gz,/data/bio2_run1_R2.fastq.gz,bio2,restriction_hic,DpnII,library2,condition_A_final
+bio2_run2,hic,mm39,condition_A,2,2,/data/bio2_run2_R1.fastq.gz,/data/bio2_run2_R2.fastq.gz,bio2,restriction_hic,DpnII,library2,condition_A_final

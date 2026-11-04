@@ -4,6 +4,7 @@ from __future__ import annotations
 import gzip
 import json
 import shutil
+import contextlib
 from pathlib import Path
 
 from workflow_common import builds_hic, json_write, text_open, truth
@@ -40,7 +41,7 @@ class MatrixProducts:
     def __init__(self, runtime):
         self.rt, self.c = runtime, runtime.c
 
-    def build(self, entity, accepted_key):
+    def build(self, entity, accepted_key, kind="all"):
         c, rt = self.c, self.rt
         paths, store = entity["paths"], rt.store(entity)
         ref = rt.plan["references"][entity["reference_id"]]
@@ -61,6 +62,7 @@ class MatrixProducts:
                     rt.command(["cooler", "ls", str(t["data"])], rt.log(entity, label + "_validate"))
                 json_write(t["provenance"], {"schema": 1, "stage": label, "signature": key, **common,
                     "accepted_pairs": str(source), "reference_id": entity["reference_id"], "members": entity["members"],
+                    "accepted_artifact_source": entity.get("alias_of", entity["id"]),
                     "dedup_units": entity["units"], "tool_versions": rt.versions,
                     "coordinates": "accepted pairs 1-based; cooler converts; Juicer short export explicitly uses pos-1"})
             return store.run(label, key, outputs, produce)
@@ -72,29 +74,30 @@ class MatrixProducts:
                 rt.command(["cooler", "info", str(t["data"])], rt.log(entity, "cooler_info"), output=t["info"])
             matrix_stage("raw_cool", raw_key, raw, {"info": Path(paths["cool_info"])})
 
-        with rt.slots["matrix"]:
-            if truth(c["RUN_MCOOL"]):
+        with (rt.slots["matrix"] if kind in {"all", "matrix"} else contextlib.nullcontext()):
+            if kind in {"all", "matrix"} and truth(c["RUN_MCOOL"]):
                 key = rt.key("norm_mcool", {**common, "resolutions": c["MCOOL_RESOLUTIONS"]}, ["cooler"], ["matrix_products.py"])
                 dest = Path(paths["norm_mcool"])
                 expected = {"data": dest, "provenance": Path(str(dest) + ".provenance.json")}
                 if not store.ensure_reusable("norm_mcool", key, expected):
                     ensure_raw()
                 matrix_stage("norm_mcool", key, lambda t, work: rt.command(["cooler", "zoomify", "-p", c["THREADS_MATRIX"],
-                    "-r", c["MCOOL_RESOLUTIONS"], "--balance", "-o", str(t["data"]), paths["raw_cool"]], rt.log(entity, "zoomify_norm")))
+                    "-r", c["MCOOL_RESOLUTIONS"], "--balance", "--balance-args", f"--nproc {c['THREADS_BALANCE']}",
+                    "-o", str(t["data"]), paths["raw_cool"]], rt.log(entity, "zoomify_norm")))
                 if truth(c["KEEP_RAW_MCOOL"]):
                     ensure_raw()
                     raw_mcool_key = rt.key("raw_mcool", {**common, "resolutions": c["MCOOL_RESOLUTIONS"]}, ["cooler"], ["matrix_products.py"])
                     matrix_stage("raw_mcool", raw_mcool_key, lambda t, work: rt.command(["cooler", "zoomify", "-p", c["THREADS_MATRIX"],
                         "-r", c["MCOOL_RESOLUTIONS"], "-o", str(t["data"]), paths["raw_cool"]], rt.log(entity, "zoomify_raw")))
-            if truth(c["KEEP_SINGLE_RES_COOL"]) or not truth(c["RUN_MCOOL"]):
+            if kind in {"all", "matrix"} and (truth(c["KEEP_SINGLE_RES_COOL"]) or not truth(c["RUN_MCOOL"])):
                 ensure_raw()
                 key = rt.key("norm_cool", common, ["cooler"], ["matrix_products.py"])
                 def balanced(t, work):
                     shutil.copyfile(paths["raw_cool"], t["data"])
-                    rt.command(["cooler", "balance", "-p", c["THREADS_MATRIX"], "-f", str(t["data"])], rt.log(entity, "balance"))
+                    rt.command(["cooler", "balance", "-p", c["THREADS_BALANCE"], "-f", str(t["data"])], rt.log(entity, "balance"))
                 matrix_stage("norm_cool", key, balanced)
 
-        if builds_hic(entity, c):
+        if kind in {"all", "hic"} and builds_hic(entity, c):
             hic_args = {**common, "resolutions": c["HIC_RESOLUTIONS"], "jar": rt.jar_identity}
             norm_key = rt.key("norm_hic", {**hic_args, "normalizations": c["HIC_NORMALIZATIONS"]}, ["java"], ["matrix_products.py"])
             final = Path(paths["norm_hic"])

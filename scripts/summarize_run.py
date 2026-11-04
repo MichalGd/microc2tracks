@@ -445,7 +445,7 @@ def main() -> None:
 def write_plan_summary(plan: dict, outdir: Path) -> None:
     """New runs use only declared physical paths; legacy report APIs stay available."""
     import shutil
-    from workflow_common import builds_hic
+    from workflow_common import builds_hic, builds_matrices
     outdir.mkdir(parents=True, exist_ok=True)
     sample_rows, group_rows, file_rows, qc_rows = [], [], [], []
     for key, entity in plan["entities"].items():
@@ -456,10 +456,15 @@ def write_plan_summary(plan: dict, outdir: Path) -> None:
         qc_path = Path(paths["filter_qc"])
         qc = json.loads(qc_path.read_text()) if qc_path.exists() else {}
         dedup = parse_pairtools_stats(Path(paths["dedup_stats"]))
+        if not entity.get("contact_processing", True):
+            qc, dedup = {}, {}  # do not present preserved older row QC as new calculations
         policy = entity["policy"]
         hic_requested = builds_hic(entity, plan["settings"])
         hic_exists = Path(paths["norm_hic"]).is_file()
         row = {"entity": key, "kind": entity["kind"], "sample": entity["name"], "reference_id": entity["reference_id"],
+               "output_role": entity.get("output_role", ""), "accepted_artifact_source": entity.get("alias_of", key),
+               "individual_contact_qc": "computed" if entity.get("contact_processing", True) else "not_computed",
+               "matrices_requested": str(builds_matrices(entity, plan["settings"])).lower(),
                "workflow_mode": plan.get("workflow_mode", "merge"), "input_stage": entity.get("input_stage", "fastq"),
                "deduplicated_input": plan["samples"].get(entity["name"], {}).get("deduplicated_pairs", ""),
                "assay": policy["assay"], "profile": policy["profile"], "restriction_enzymes": "+".join(policy["enzymes"]),
@@ -474,6 +479,10 @@ def write_plan_summary(plan: dict, outdir: Path) -> None:
                "hic_output_status": ("present" if hic_requested else "existing_preserved_not_requested") if hic_exists else
                    ("pending_or_failed" if hic_requested else "not_requested"),
                "norm_hic_path": paths["norm_hic"] if hic_requested or hic_exists else ""}
+        if not entity.get("contact_processing", True):
+            for label in ("dedup_total", "dedup_total_nodups", "dedup_total_dups", "valid_pairs_total", "valid_pairs_cis", "valid_pairs_trans", "valid_pairs_path"):
+                row[label] = ""
+            row["filtering_provenance"] = "not computed for this run; see joint library output"
         (sample_rows if entity["kind"] == "sample" else group_rows).append(row)
         for category, count in qc.get("exclusive_counts", {}).items():
             qc_rows.append({"entity": key, "count_type": "exclusive", "category": category, "count": str(count)})

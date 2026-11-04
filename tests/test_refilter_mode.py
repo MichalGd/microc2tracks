@@ -8,6 +8,7 @@ import json
 import os
 import shutil
 import sys
+import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -224,7 +225,13 @@ class RefilterModeTests(unittest.TestCase):
                 pass
             else:
                 raise AssertionError(first)
-        return fake
+        # These mocks emulate subprocess stdin by temporarily replacing the
+        # process-global sys.stdin. Real tools have independent process streams.
+        mock_stdin_lock = threading.RLock()
+        def serialized(*args, **kwargs):
+            with mock_stdin_lock:
+                return fake(*args, **kwargs)
+        return serialized
 
     def test_runner_skips_alignment_and_dedup_preserves_inputs_and_rebuilds_products(self):
         original, index, original_id = sha256(self.source), sha256(self.index), source_identity(self.source)
