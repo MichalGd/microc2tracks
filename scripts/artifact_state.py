@@ -89,6 +89,35 @@ class StorageGuard:
         with self.reservation_lock:
             self.reservations.pop(token, None)
 
+    def grow(self, token, requests):
+        """Grow an admitted BL task after measuring its plain FASTQ bound.
+
+        Retain its original reservation on failure; count other tasks exactly
+        once. Admission estimates remain reservations, not filesystem quotas.
+        """
+        with self.reservation_lock:
+            report = self.check()
+            grouped = dict(self.reservations.get(token, {}))
+            needed = {}
+            for path, amount in requests.items():
+                device = nearest_existing(Path(path)).stat().st_dev
+                needed[device] = needed.get(device, 0) + int(amount)
+            for device, amount in needed.items():
+                grouped[device] = max(grouped.get(device, 0), amount)
+            held, floors, free = {}, {}, {}
+            for key, reservation in self.reservations.items():
+                if key != token:
+                    for device, amount in reservation.items():
+                        held[device] = held.get(device, 0) + amount
+            for item in report.values():
+                device = item["device"]
+                floors[device] = max(floors.get(device, 0), item["reserve_gib"] * 1024**3)
+                free[device] = item["free_bytes"]
+            if any(free.get(d, 0) < floors.get(d, 0) + held.get(d, 0) + n for d, n in grouped.items()):
+                return False
+            self.reservations[token] = grouped
+            return True
+
     def check(self) -> dict:
         for mount in self.mounts:
             if not mount.is_mount():

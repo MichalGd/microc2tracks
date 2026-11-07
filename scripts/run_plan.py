@@ -13,7 +13,7 @@ from pathlib import Path
 from reference_registry import Registry, RegistryError, read_sizes, validate_reference_files
 from refilter_inputs import read_sheet as read_refilter_sheet, validate_header
 from validate_samplesheet import validate_sheet
-from workflow_common import VERSION, absolute, annotate_hic_outputs, identity, json_write, load_config, resolve_policy, safe_id, signature, truth
+from workflow_common import VERSION, absolute, annotate_hic_outputs, identity, json_write, load_config, resolve_policy, resolve_preprocessing, safe_id, signature, truth
 
 
 def resolve_roots(c: dict) -> dict:
@@ -31,6 +31,7 @@ def artifact_paths(roots: dict, relative: str, name: str, c: dict) -> dict:
     meta, pairs, matrix = Path(roots["out"]) / relative, Path(roots["pairs"]) / relative / "03_pairs", Path(roots["matrices"]) / relative / "04_matrices"
     result = {"entity_dir": meta, "pairs_dir": pairs, "matrix_dir": matrix, "logs": meta / "logs",
               "done": meta / "logs/done", "qc_dir": meta / "01_qc",
+              "blhic_qc": meta / "01_qc" / f"{name}.blhic.json", "blhic_stats": meta / "01_qc" / f"{name}.blhic.trim.stat",
               "sorted": pairs / f"{name}.sorted.pairs.gz", "dedup": pairs / f"{name}.dedup.pairs.gz",
               "dedup_stats": pairs / f"{name}.dedup.stats.txt",
               "accepted": pairs / f"{name}.valid.mapq{c['MAPQ_THRESHOLD']}.pairs.gz",
@@ -115,10 +116,17 @@ def build_plan(c: dict, sheet: Path, *, check_files=True, mode: str | None = Non
     for row in rows:
         name = row["sample"]
         policy = resolve_policy(row, c)
+        if not refilter and policy["profile"] == "blhic":
+            row["preprocessing"] = resolve_preprocessing(row, c, policy)
         reference = references[row["reference_genome"]]
         policy["canonical_regex"] = reference["canonical_regex"] if policy["filter_canonical"] else ".*"
         if refilter:
             row["input_header"] = validate_header(Path(row["deduplicated_pairs"]), reference)
+            sidecar = row["input_header"].get("sidecar_identity")
+            if sidecar:
+                # Informational provenance only; the immutable normalizer and
+                # existing scientific transform/compatibility remain unchanged.
+                row["input_header"]["read_preprocessing"] = json.loads(Path(sidecar["path"]).read_text()).get("read_preprocessing")
             known_members = row["input_header"]["known_members"]
             if known_members:
                 if row["input_members_declared"] and row["input_members"] != known_members:

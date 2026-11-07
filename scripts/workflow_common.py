@@ -15,7 +15,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-VERSION = "3.0.0-rc6"
+VERSION = "3.0.0-rc7"
 DEFAULTS = {
     "WORKFLOW_MODE": "fastq",
     "RESUME_FROM_CHECKPOINTS": "false", "REUSE_RC5_OUTPUTS": "true",
@@ -38,6 +38,7 @@ DEFAULTS = {
     "HIC_MIN_CIS_DIST": "0", "HIC_PROTOCOL": "legacy", "HIC_RESTRICTION_ENZYMES": "",
     "HIC_REMOVE_SAME_FRAGMENT": "true", "HIC_REMOVE_ADJACENT_INWARD": "false",
     "HIC_PROTOCOL_REGISTRY": str(ROOT / "config/hic_protocols.json"),
+    "BLHIC_INPUT_STATE": "raw", "BLHIC_TRIMLINKER": "", "MEMORY_BLHIC_GB": "16",
     "FILTER_CANONICAL_CHROMS": "true", "DEDUP_BACKEND": "scipy", "DEDUP_METHOD": "max",
     "DEDUP_MAX_MISMATCH": "3", "DEDUP_CHUNKSIZE": "10000", "DEDUP_CARRYOVER": "100",
     "PAIRTOOLS_PARSE_MIN_MAPQ": "1", "PAIRTOOLS_WALKS_POLICY": "5unique",
@@ -155,6 +156,8 @@ def load_config(path: Path) -> dict[str, str]:
 
 
 def validate_config(c: dict[str, str]) -> None:
+    if c["BLHIC_INPUT_STATE"] not in {"raw", "pretrimmed"}:
+        raise ValueError("BLHIC_INPUT_STATE must be raw/pretrimmed")
     if c["WORKFLOW_MODE"] not in {"fastq", "refilter-deduplicated"}:
         raise ValueError("WORKFLOW_MODE must be fastq/refilter-deduplicated")
     if not c["OUTDIR"].strip():
@@ -292,6 +295,8 @@ def resolve_policy(row: dict, c: dict) -> dict:
     data = registry_data(Path(c["HIC_PROTOCOL_REGISTRY"]))
     assay = row["assay"]
     profile = (row.get("hic_protocol") or c["HIC_PROTOCOL"]) if assay == "hic" else "microc"
+    if row.get("blhic_input_state") and profile != "blhic":
+        raise ValueError("blhic_input_state is only valid for the blhic protocol")
     enzymes: list[str] = []
     if assay == "microc":
         if row.get("hic_protocol") or row.get("restriction_enzymes"):
@@ -311,6 +316,8 @@ def resolve_policy(row: dict, c: dict) -> dict:
                 raise ValueError("Restriction Hi-C requires explicit restriction_enzymes/HIC_RESTRICTION_ENZYMES")
             if profile == "dovetail_hic" and enzymes != ["DpnII"]:
                 raise ValueError("dovetail_hic is the original DpnII kit; use restriction_hic for other digests")
+            if profile == "blhic" and (enzymes != ["HaeIII"] or data["enzymes"]["HaeIII"] != {"motif": "GGCC", "cut_offset": 2}):
+                raise ValueError("blhic requires HaeIII (GGCC, offset 2); override an inherited enzyme with restriction_enzymes=HaeIII")
         elif value:
             raise ValueError("legacy Hi-C cannot silently ignore an enzyme; select restriction_hic")
     return {"assay": assay, "profile": profile, "enzymes": enzymes,
@@ -320,3 +327,16 @@ def resolve_policy(row: dict, c: dict) -> dict:
             "remove_same_fragment": bool(enzymes) and truth(c["HIC_REMOVE_SAME_FRAGMENT"]),
             "remove_adjacent_inward": bool(enzymes) and truth(c["HIC_REMOVE_ADJACENT_INWARD"]),
             "filter_canonical": truth(c["FILTER_CANONICAL_CHROMS"])}
+
+
+def resolve_preprocessing(row: dict, c: dict, policy: dict) -> dict:
+    """Read preparation is separate from contact selection and operational paths."""
+    if policy["profile"] != "blhic":
+        return {}
+    from blhic_preprocessing import PRESET
+    state = row.get("blhic_input_state") or c["BLHIC_INPUT_STATE"]
+    if state not in {"raw", "pretrimmed"}:
+        raise ValueError("blhic_input_state must be raw/pretrimmed")
+    if any(arg == "--merge" or arg.startswith("--merge=") or arg == "-m" for arg in shlex.split(c["FASTP_EXTRA_ARGS"])):
+        raise ValueError("BL-Hi-C mapping requires paired reads; FASTP_EXTRA_ARGS must not enable merging")
+    return {"preset": dict(PRESET), "input_state": state}

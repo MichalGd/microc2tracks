@@ -68,7 +68,7 @@ def resource_profile(c: dict) -> dict:
             "max_prepared": int(c["MAX_PREPARED_SAMPLES"]), "memory_headroom_gib": float(c["MIN_AVAILABLE_MEMORY_GB"])}
 
 
-def reservation(kind: str, c: dict, plan: dict) -> tuple[int, float]:
+def reservation(kind: str, c: dict, plan: dict, entity=None) -> tuple[int, float]:
     compression = int(c["THREADS_COMPRESS"])
     cpu = {"fastp": int(c["THREADS_FASTP"]) + 1,
            "alignment": int(c["THREADS_ALIGN"]) + int(c["THREADS_SORT"]) + compression + 4,
@@ -79,6 +79,16 @@ def reservation(kind: str, c: dict, plan: dict) -> tuple[int, float]:
            "hic": int(c["THREADS_HIC_NORM"]) + 4,
            "downstream": int(c["COOLTOOLS_THREADS"]) + 2, "report": 3}[kind]
     memory = float(c[f"MEMORY_{'ALIGN' if kind == 'alignment' else kind.upper()}_GB"])
+    if kind == "fastp":
+        from blhic_preprocessing import raw_bl_rows
+        selected = raw_bl_rows(plan)
+        if entity is not None:
+            selected = [row for row in selected if row["sample"] == entity["name"]]
+        if selected:
+            # Upstream holds 2M records per mate. 16 GiB is a conservative
+            # allocation bound under strict 999-byte line limits, not a measured
+            # production peak. The existing CPU budget is reused sequentially.
+            memory = max(memory, 16.0, float(c["MEMORY_BLHIC_GB"]))
     if kind in {"merge", "dedup", "joint_dedup"}:
         readers = max((len(e.get("units", [])) if e.get("kind") == "pool" else len(e["members"]) for e in plan.get("entities", {}).values()
                        if e.get("kind") in {"dedup", "pool"}), default=1) if kind != "dedup" else 1

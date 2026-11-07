@@ -16,6 +16,7 @@ flowchart TD
 
 | Document | Purpose |
 |---|---|
+| `19_blhic_preprocessing.md` | RC7 native HaeIII/two-step bridge processing, optional pinned tool, QC, resources and resume. |
 | `01_analysis_and_design.md` | Legacy-script analysis, method-review synthesis, and workflow architecture. |
 | `02_installation_server.md` | Shared Linux server setup, conda installation, permissions, and resource profiles. |
 | `03_inputs_and_config.md` | Sample sheet columns and config values. |

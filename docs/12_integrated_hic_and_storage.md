@@ -42,7 +42,7 @@ safety rule. Existing originals and prior run metadata remain available.
 
 | Optional column | Meaning when nonempty | Blank/absent |
 |---|---|---|
-| `hic_protocol` | `legacy`, `restriction_hic`, `dovetail_hic` | Inherit config; old configs without HIC_PROTOCOL fall back to legacy |
+| `hic_protocol` | `legacy`, `restriction_hic`, `dovetail_hic`, `blhic` (RC7) | Inherit config; old configs without HIC_PROTOCOL fall back to legacy |
 | `restriction_enzymes` | Explicit `+`-separated supported enzyme names | Inherit config or selected preset |
 | `dedup_group` | User-selected rows to deduplicate together once | Independent singleton row |
 
@@ -75,7 +75,7 @@ Configs are trusted Bash code; sample metadata is never evaluated as shell code.
 ### Enzymes and filtering
 
 `config/hic_protocols.json` defines DpnII (`^GATC`), MboI (`^GATC`), NlaIII
-(`CATG^`) and HindIII (`A^AGCTT`). Use one or an explicit combination such as
+(`CATG^`), HindIII (`A^AGCTT`) and HaeIII (`GG^CC`, RC7). Use one or an explicit combination such as
 `DpnII+NlaIII`. Combined digests union cut positions. Recognition motifs are not
 inferred from an assembly. The initial extensible registry validates palindromic
 literal A/C/G/T motifs and their plus-strand cut offsets.
@@ -83,6 +83,10 @@ literal A/C/G/T motifs and their plus-strand cut offsets.
 The optional `dovetail_hic` profile denotes the original DpnII-based kit, not
 Omni-C or LinkPrep. It rejects contradictory enzyme settings. It adds no
 unverified kit-specific aligner changes, bridge trimming or UMI processing.
+
+RC7's `blhic` profile requires HaeIII and adds automatic HaeIII/two-step bridge
+processing. See [its guide](19_blhic_preprocessing.md); ordinary profiles retain
+their previous preparation behavior.
 
 Digests are built from the exact FASTA and validated chromosome sizes. Cache
 identity includes reference content, enzyme definitions and generator version;

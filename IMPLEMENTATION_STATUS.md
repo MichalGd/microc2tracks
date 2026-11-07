@@ -1,4 +1,13 @@
-# Integrated workflow status: 3.0.0-rc6
+# Integrated workflow status: 3.0.0-rc7
+
+RC7 prepared 2026-11-07 from `c3fce30abf8312653180e0296cb408dfb11da5b5`.
+Native HaeIII/two-step BL bridge processing is implemented inside the existing
+trim stage with optional fastp, paired validation, QC/provenance, measured disk
+admission and checkpoint lineage. See [the BL guide](docs/19_blhic_preprocessing.md)
+and [actual verification results](TEST_REPORT.md). This development release has
+not been deployed or used for a real GSE157339 mapping pilot.
+
+## Historical RC6 baseline
 
 RC6 prepared 2026-11-04 on the reviewed RC5 commit
 `2ab2a8bcb27f82f8342ec60ab3c631433c962463`. Checked bounded streaming, monitored

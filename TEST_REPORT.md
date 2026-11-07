@@ -1,5 +1,57 @@
 # Test Report
 
+## RC7 integrated BL-Hi-C candidate: 2026-11-07
+
+Runtime: **3.0.0-rc7**, based on
+`c3fce30abf8312653180e0296cb408dfb11da5b5`. This is a local development
+release, not a report of deployment or production mapping on biolserv.
+
+Executed in existing Ubuntu WSL with Python 3.12.3 and an existing C++/OpenMP/zlib
+toolchain. No analysis environment or software was installed on the server.
+
+- **14 new BL tests passed**, including the actual pinned trimLinker binary at
+  one/two threads on synthetic reads. Cases cover fixed linker selection,
+  mismatches, length/quality synchronization, malformed/corrupt pairs, failure
+  publication, pretrimmed declarations, QC, same-root disk reservations,
+  configuration precedence and checkpoint lineage.
+- **48 existing focused regressions passed**: 24 integration/scientific-policy
+  cases, 11 scheduler/performance orchestration cases, 10 refilter cases and
+  three relevant RC6 missing-raw/RC5-migration cases. These preserve ordinary
+  Hi-C/Micro-C behavior; mock-tool tests are not real aligner benchmarks.
+- The new normal-DAG test uses real bridge processing with downstream tools
+  mocked, confirms fastp-disabled execution and successful resume after raw and
+  disposable intermediates are removed. Another test checks bridge -> optional
+  fastp -> alignment order.
+- **62 unique focused cases passed in total**; the BL and existing selections
+  were run separately as implementation fixes were completed. No failures or
+  skips remain in these executed Linux selections. New optional BL tests skip
+  on non-Linux systems or when the optional tool has not been built.
+- Bash syntax passed for all 11 shipped shell runners/examples. The workflow
+  version command returned `microc2tracks 3.0.0-rc7`.
+- The pinned trimmer source compiled locally; its source/license and binary
+  identity receipt were checked. The source archive excludes local binaries
+  and includes an offline one-time build helper and GPL source/license.
+
+Reproduce the focused selection after building the optional tool:
+
+```bash
+python3 -B scripts/build_trimlinker.py
+PYTHONPATH=tests:scripts python3 -B -m unittest \
+  test_blhic test_integration_features test_stage_performance test_refilter_mode \
+  test_rc6_safety.SafetyTests.test_resume_with_removed_fastqs_uses_recorded_lineage_and_rejects_science_changes \
+  test_rc6_safety.SafetyTests.test_completed_library_resumes_after_raw_and_sorted_inputs_removed \
+  test_rc6_safety.SafetyTests.test_exact_rc5_sorted_contract_migrates_without_rewriting_payload_or_proof -v
+```
+
+No real GSE157339 FASTQs, full mapping, production matrices or throughput pilot
+were run. Raw BL tasks reserve a conservative 16-GiB minimum based on the
+upstream bounded reader; this is not measured library-specific peak memory.
+Live server input/tool state, practical resource use and BL contact-filter
+behavior still need the bounded production pilot described in the
+[BL guide](docs/19_blhic_preprocessing.md). Arima N/GANTC support is not included.
+
+Historical results below apply to their named versions.
+
 ## RC6 bounded-streaming candidate: 2026-11-04
 
 Runtime: `3.0.0-rc6`; reviewed RC5 base:

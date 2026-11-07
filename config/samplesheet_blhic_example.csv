@@ -1,0 +1,2 @@
+sample,assay,reference_genome,condition,biological_replicate,technical_replicate,fastq_r1,fastq_r2,merge_group,hic_protocol,restriction_enzymes,dedup_group,blhic_input_state
+GSM4761716_CRR126286_WT_GM_Rep1,hic,mm39,WT_GM,1,1,/absolute/raw/GSM4761716_CRR126286_WT_GM_proliferating_myoblasts_BL-HiC_Rep1_R1.fastq.gz,/absolute/raw/GSM4761716_CRR126286_WT_GM_proliferating_myoblasts_BL-HiC_Rep1_R2.fastq.gz,,blhic,HaeIII,,raw

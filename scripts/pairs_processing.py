@@ -38,8 +38,14 @@ class PairProcessor:
                 from checkpoint_resume import sorted_checkpoint
                 self.keys[f"sample:{name}"] = {"trim": "missing-raw-inputs", "sorted": sorted_checkpoint(runtime, name)}
                 continue
-            trim = runtime.key("trim", {"inputs": [identity(Path(row[k])) for k in ("fastq_r1", "fastq_r2")],
-                                       "run_fastp": self.c["RUN_FASTP"], "fastp_args": self.c["FASTP_EXTRA_ARGS"]}, ["fastp"])
+            parameters = {"inputs": [identity(Path(row[k])) for k in ("fastq_r1", "fastq_r2")],
+                          "run_fastp": self.c["RUN_FASTP"], "fastp_args": self.c["FASTP_EXTRA_ARGS"]}
+            if row.get("preprocessing"):
+                from blhic_preprocessing import scientific_tool_identity
+                parameters["read_preprocessing"] = row["preprocessing"]
+                if row["preprocessing"]["input_state"] == "raw":
+                    parameters["trimLinker"] = scientific_tool_identity(runtime.versions.get("trimLinker"))
+            trim = runtime.key("trim", parameters, ["fastp"])
             sorted_key = runtime.key("sorted", {"trim": trim, "reference": ref["identity"],
                 "bwa_args": self.c["BWA_EXTRA_ARGS"], "parse": {k: self.c[k] for k in self.c if k.startswith("PAIRTOOLS_") and k not in {"PAIRTOOLS_SORT_MEMORY", "PAIRTOOLS_MERGE_MEMORY"}}}, ["bwa-mem2", "pairtools"], ["pairs_processing.py"])
             self.keys[f"sample:{name}"] = {"trim": trim, "sorted": sorted_key}
@@ -72,7 +78,8 @@ class PairProcessor:
         entity, keys = self.plan["entities"][key], self.keys[key]
         paths = entity["paths"]
         if stage == "trim":
-            if self.reusable(key, "sorted") or not truth(self.c["RUN_FASTP"]):
+            row = self.plan["samples"][entity["name"]]
+            if self.reusable(key, "sorted") or (not truth(self.c["RUN_FASTP"]) and not row.get("preprocessing")):
                 return True
             outputs = self.trim_outputs(entity)
         elif stage in {"sorted", "dedup", "accepted"}:
@@ -89,9 +96,13 @@ class PairProcessor:
 
     def trim_outputs(self, entity):
         paths = entity["paths"]
-        return {"r1": Path(paths["trim_r1"]), "r2": Path(paths["trim_r2"]),
-                "html": Path(paths["qc_dir"]) / f"{entity['name']}.fastp.html",
-                "json": Path(paths["qc_dir"]) / f"{entity['name']}.fastp.json"}
+        result = {"r1": Path(paths["trim_r1"]), "r2": Path(paths["trim_r2"])}
+        if truth(self.c["RUN_FASTP"]):
+            result.update(html=Path(paths["qc_dir"]) / f"{entity['name']}.fastp.html",
+                          json=Path(paths["qc_dir"]) / f"{entity['name']}.fastp.json")
+        if self.plan["samples"][entity["name"]].get("preprocessing"):
+            result.update(blhic_qc=Path(paths["blhic_qc"]), blhic_stats=Path(paths["blhic_stats"]))
+        return result
 
     def available(self, key, stage):
         """Read-only check for a valid checkpoint, including a storage-only move.
@@ -113,15 +124,26 @@ class PairProcessor:
         row = self.plan["samples"][entity["name"]]
         if any(not Path(row[k]).is_file() for k in ("fastq_r1", "fastq_r2")):
             raise ValueError(f"No reusable sorted/deduplicated checkpoint for {key}; missing original FASTQs are required")
-        if not truth(self.c["RUN_FASTP"]) or self.reusable(key, "sorted"):
+        if (not truth(self.c["RUN_FASTP"]) and not row.get("preprocessing")) or self.reusable(key, "sorted"):
             return Path(row["fastq_r1"]), Path(row["fastq_r2"])
         outputs = self.trim_outputs(entity)
         def trim(t, work):
-            with self.rt.slots["fastp"]:
-                self.rt.command(["fastp", "-i", row["fastq_r1"], "-I", row["fastq_r2"], "-o", str(t["r1"]), "-O", str(t["r2"]),
+            def fastp(sources):
+                self.rt.command(["fastp", "-i", str(sources[0]), "-I", str(sources[1]), "-o", str(t["r1"]), "-O", str(t["r2"]),
                     "--thread", self.c["THREADS_FASTP"], "--html", str(t["html"]), "--json", str(t["json"]), *shlex.split(self.c["FASTP_EXTRA_ARGS"])],
                     self.rt.log(entity, "fastp"), timeout=int(self.c["FASTP_TIMEOUT_SECONDS"]) or None)
-        self.rt.store(entity).run("trim", self.keys[key]["trim"], outputs, trim)
+            with self.rt.slots["fastp"]:
+                if row.get("preprocessing"):
+                    from blhic_preprocessing import prepare
+                    prepare(self.rt, entity, row, t, work, fastp)
+                else:
+                    fastp((row["fastq_r1"], row["fastq_r2"]))
+        reserved = f"{entity['id']}/trim" in self.rt.guard.reservations
+        try:
+            self.rt.store(entity).run("trim", self.keys[key]["trim"], outputs, trim)
+        finally:
+            if row.get("preprocessing") and not reserved:
+                self.rt.guard.release(f"{entity['id']}/trim")
         return outputs["r1"], outputs["r2"]
 
     def provenance(self, entity, stage, key, data_path):
@@ -134,12 +156,19 @@ class PairProcessor:
                 "qc": entity["paths"]["filter_qc"],
                 "parse_settings": {k: v for k, v in self.c.items() if k.startswith("PAIRTOOLS_") and "MEMORY" not in k},
                 "dedup_settings": {k: v for k, v in self.c.items() if k.startswith("DEDUP_")}}
+        preprocessing = [{"sample": name, "contract": self.plan["samples"][name]["preprocessing"],
+                          "receipt": self.plan["entities"][f"sample:{name}"]["paths"]["blhic_qc"]}
+                         for name in entity.get("source_rows", entity["members"])
+                         if self.plan["samples"].get(name, {}).get("preprocessing")]
+        if preprocessing:
+            result["read_preprocessing"] = preprocessing
         if self.plan.get("workflow_mode") == "refilter-deduplicated":
             result.update(input_stage="deduplicated", alignment_performed=False, parsing_performed=False, deduplication_performed=False,
                           dedup_settings=None, parse_settings=None,
                           deduplication_status="Assumed from user-declared input; not independently verified or repaired")
             result["import_sources"] = [{"sample": row, "identity": self.plan["samples"][row]["input_identity"],
-                "input_members": self.plan["samples"][row]["input_members"], "previous_filter_policy": self.plan["samples"][row]["input_header"]["previous_filter_policy"]}
+                "input_members": self.plan["samples"][row]["input_members"], "previous_filter_policy": self.plan["samples"][row]["input_header"]["previous_filter_policy"],
+                "read_preprocessing": self.plan["samples"][row]["input_header"].get("read_preprocessing")}
                 for row in entity["source_rows"]]
         elif entity.get("import_sources"):
             result.update(import_sources=entity["import_sources"], dedup_settings=None, deduplication_performed=False,

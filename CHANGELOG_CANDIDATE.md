@@ -1,5 +1,20 @@
 # Changelog
 
+## 3.0.0-rc7 - integrated BL-Hi-C (2026-11-07)
+
+- Add `hic_protocol=blhic` / `HIC_PROTOCOL=blhic`, fixed HaeIII/two-step preset,
+  raw/pretrimmed input declarations and automatic bridge-before-fastp processing.
+- Bundle pinned standalone trimLinker source/license and an offline build helper;
+  require its build/executable identity only for raw BL input runs.
+- Validate complete paired inputs/outputs, reconcile linker classes and retain
+  original-input versus post-bridge/fastp QC denominators.
+- Add BL-specific stage lineage and missing-raw resume checks; preserve ordinary
+  Hi-C/Micro-C scientific keys, contact filters and legacy reuse.
+- Reserve BL batch RAM and measured plain-output disk bounds through the existing
+  scheduler/guard; preserve raw inputs and incomplete attempt diagnostics.
+- Add focused actual-trimmer and workflow regression cases; see TEST_REPORT.md
+  for executed checks and remaining production-pilot limits.
+
 ## 3.0.0-rc6 - bounded streaming and recovery (2026-11-04)
 
 - Fuse sorted-input merging and joint library deduplication without a complete

@@ -4,7 +4,15 @@
 
 The first implementation follows the style of the existing Shell repositories `fastq2tracks` and `rnaseq2tracksP`: a top-level runner, `config/`, `docs/`, `examples/`, `scripts/`, `environment.yml`, and simple tests.
 
-Version **3.0.0-rc6** adds checked streaming joint deduplication, bounded contact
+Version **3.0.0-rc7** adds automatic HaeIII/two-step BL-Hi-C bridge preprocessing
+under `assay=hic`, selected with `hic_protocol=blhic` or `HIC_PROTOCOL=blhic`.
+Supply the original paired FASTQs; the workflow runs the pinned linker stage,
+optional fastp and the existing mapping/matrix stages. Read the
+[BL-Hi-C setup, integrity and restart guide](docs/19_blhic_preprocessing.md).
+The optional trimmer is built once from bundled source; no runtime download or
+change to an active server installation is performed.
+
+RC6 added checked streaming joint deduplication, bounded contact
 filtering and parallel Juicer export, compatible pooled QC/raw-count reuse,
 checkpoint-only recovery, and stronger resource/publication safeguards.
 See the [RC6 upgrade and safety guide](docs/18_rc6_streaming_recovery_and_storage.md).
@@ -69,7 +77,7 @@ and already-merged refilter inputs.
 ```mermaid
 flowchart LR
   R["Validated reference registry<br/>including custom assemblies"] --> A
-  A["Sample sheet<br/>paired FASTQ + reference_genome"] --> B["fastp<br/>QC + trimming"]
+  A["Sample sheet<br/>paired FASTQ + reference_genome"] --> B["Read preparation<br/>BL bridge where selected; optional fastp"]
   B --> C["bwa-mem2<br/>Hi-C/Micro-C alignment"]
   C --> D["pairtools parse/sort<br/>retained original sorted pairs"]
   D --> Q["Optional independent per-row dedup<br/>skipped for grouped run-only inputs"]

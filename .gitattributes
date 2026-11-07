@@ -5,7 +5,10 @@
 *.yml text eol=lf
 *.yaml text eol=lf
 *.json text eol=lf
+# Preserve pinned upstream source whitespace apart from LF normalization.
+vendor/trimLinker/* text eol=lf -whitespace
 *.conf text eol=lf
+FILE_TREE.txt text eol=lf
 config/launcher.conf.example text eol=lf
 *.csv text eol=lf
 *.tsv text eol=lf

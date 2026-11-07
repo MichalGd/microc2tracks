@@ -484,6 +484,15 @@ def write_plan_summary(plan: dict, outdir: Path) -> None:
                 row[label] = ""
             row["filtering_provenance"] = "not computed for this run; see joint library output"
         (sample_rows if entity["kind"] == "sample" else group_rows).append(row)
+        if entity["kind"] == "sample" and plan["samples"].get(entity["name"], {}).get("preprocessing"):
+            receipt_path = Path(paths["blhic_qc"])
+            receipt = json.loads(receipt_path.read_text()) if receipt_path.is_file() else {}
+            row.update(blhic_input_state=plan["samples"][entity["name"]]["preprocessing"]["input_state"],
+                       blhic_original_raw_pairs=as_text(receipt.get("original_raw_pairs")),
+                       blhic_supplied_pairs=as_text(receipt.get("supplied_input", {}).get("pairs")),
+                       blhic_bridge_retained_pairs=as_text((receipt.get("bridge") or {}).get("pairs")),
+                       blhic_mapping_input_pairs=as_text(receipt.get("mapping_input", {}).get("pairs")),
+                       blhic_provenance=receipt.get("provenance", "not yet verified"), blhic_qc=str(receipt_path))
         for category, count in qc.get("exclusive_counts", {}).items():
             qc_rows.append({"entity": key, "count_type": "exclusive", "category": category, "count": str(count)})
         for category, count in qc.get("diagnostic_flags", {}).items():
@@ -492,6 +501,12 @@ def write_plan_summary(plan: dict, outdir: Path) -> None:
             path = Path(value)
             if path.is_file():
                 file_rows.append({"entity": key, "category": label, "path": value, "size_bytes": str(path.stat().st_size)})
+    blhic_fields = ["blhic_input_state", "blhic_original_raw_pairs", "blhic_supplied_pairs", "blhic_bridge_retained_pairs",
+                    "blhic_mapping_input_pairs", "blhic_provenance", "blhic_qc"]
+    if any("blhic_input_state" in row for row in sample_rows):
+        for row in sample_rows:
+            for field in blhic_fields:
+                row.setdefault(field, "")
     write_tsv(outdir / "microc2tracks_sample_summary.tsv", sample_rows)
     write_tsv(outdir / "microc2tracks_merge_summary.tsv", group_rows)
     write_tsv(outdir / "microc2tracks_filter_counts.tsv", qc_rows)

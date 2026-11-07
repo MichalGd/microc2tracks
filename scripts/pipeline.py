@@ -120,6 +120,9 @@ def tool_versions(plan):
     if (matrices and c["POOL_COOLER_MODE"] == "counts" and any(e.get("biological_dependencies") for e in plan["entities"].values())
             and not re.search(r"\b0\.10\.4\b", versions.get("cooler", ""))):
         raise RuntimeError("Raw-count pooling is validated with Cooler 0.10.4. Use POOL_COOLER_MODE=pairs for another version; do not update a running environment in place.")
+    from blhic_preprocessing import identify_tool, raw_bl_rows
+    if raw_bl_rows(plan):
+        versions["trimLinker"] = identify_tool(c)
     return versions
 
 
@@ -281,6 +284,8 @@ def write_manifests(plan):
                      "browser_preset": ref["browser_preset"], "sample_dir": entity["paths"]["entity_dir"],
                      "pairs_dir": entity["paths"]["pairs_dir"], "matrix_dir": entity["paths"]["matrix_dir"],
                      "merge_group": sample["resolved_merge_group"], "workflow_mode": plan.get("workflow_mode", "fastq"),
+                     "blhic_input_state": sample.get("preprocessing", {}).get("input_state", ""),
+                     "blhic_preset": sample.get("preprocessing", {}).get("preset", {}).get("id", ""),
                      "input_stage": entity.get("input_stage", "fastq"), "deduplicated_pairs": sample.get("deduplicated_pairs", ""),
                      "input_members": ";".join(sample.get("input_members", [name]))})
         tech.append({"merge_group": sample["resolved_merge_group"], "sample": name,
@@ -298,7 +303,8 @@ def write_manifests(plan):
                        "output_role": entity.get("output_role", "")})
     tsv_write(out / "sample_manifest.tsv", rows, ["sample", "assay", "reference_id", "species", "assembly", "browser_preset", "condition",
         "biological_replicate", "technical_replicate", "merge_group", "dedup_group", "hic_protocol", "restriction_enzymes", "fastq_r1", "fastq_r2", "sample_dir", "pairs_dir", "matrix_dir",
-        "workflow_mode", "input_stage", "deduplicated_pairs", "input_members", "final_pool"])
+        "workflow_mode", "input_stage", "deduplicated_pairs", "input_members", "final_pool"] +
+        (["blhic_input_state", "blhic_preset"] if any(row.get("preprocessing") for row in plan["samples"].values()) else []))
     tsv_write(out / "technical_replicates.tsv", tech, ["merge_group", "sample", "pairs", "reference_id", "dedup_unit", "input_stage"])
     tsv_write(out / "merge_manifest.tsv", merges, ["merge_group", "reference_id", "assembly", "browser_preset", "members", "dedup_units", "merge_dir", "pairs_dir", "matrix_dir", "pool_type", "output_role", "accepted_pairs", "accepted_artifact_source"])
     for key, unit in plan["dedup_units"].items():
@@ -598,7 +604,7 @@ def main():
             requested = {"report"}
             if plan["samples"] and plan.get("workflow_mode") == "fastq":
                 requested.add("alignment")
-                if truth(c["RUN_FASTP"]):
+                if truth(c["RUN_FASTP"]) or any(row.get("preprocessing") for row in plan["samples"].values()):
                     requested.add("fastp")
                 requested.add("dedup")
             if plan["dedup_units"] or plan["pools"]:
@@ -615,6 +621,7 @@ def main():
                 if cpus > profile["cpu_budget"] or memory > profile["memory_gib"]:
                     raise ValueError(f"{kind} reservation {cpus} CPU slots/{memory:.1f} GiB exceeds global budget; adjust resources")
             print(json.dumps({"workflow_mode": plan.get("workflow_mode", "merge"), "storage": storage_guard(plan).check(), "samples": len(plan["samples"]),
+                "read_preprocessing": {name: row["preprocessing"] for name, row in plan["samples"].items() if row.get("preprocessing")},
                 "dedup_units": plan["dedup_units"], "pools": plan["pools"],
                 "hic_output_scope": c["HIC_OUTPUT_SCOPE"], "hic_targets": hic_targets(plan), "tool_versions": versions,
                 "resource_profile": profile, "stage_reservations": reservations,

@@ -1,0 +1,10 @@
+{
+    "source_commit":  "e120726d6440b24034f70bc3c51c17f351fef496",
+    "source_url":  "https://github.com/GuipengLi/ChIA-PET2",
+    "normalization":  "LF line endings; otherwise unchanged upstream source",
+    "sha256":  {
+                   "ChIA-PET2.h":  "07433c4e8546b7df04077f989cf806c2258c39316a5c0fb54041b84547780232",
+                   "trimLinker.cpp":  "71c831c54379db2ecf69a8fe2235d86cc0a7c0eda59eed05a10416e661970175",
+                   "LICENSE.txt":  "e1c0ad728983d8a57335e52cf1064f1affd1d454173d8cebd3ed8b4a72b48704"
+               }
+}

@@ -103,3 +103,13 @@ tests/test_rc6_real_science.py
 tests/test_rc6_safety.py
 tests/benchmark_rc6.py
 docs/rc6_filter_benchmark.json
+config/config_blhic_example.conf
+config/samplesheet_blhic_example.csv
+docs/19_blhic_preprocessing.md
+scripts/blhic_preprocessing.py
+scripts/build_trimlinker.py
+tests/test_blhic.py
+vendor/trimLinker/ChIA-PET2.h
+vendor/trimLinker/trimLinker.cpp
+vendor/trimLinker/LICENSE.txt
+vendor/trimLinker/source.json

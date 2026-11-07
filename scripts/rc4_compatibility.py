@@ -25,7 +25,7 @@ RC4_HASHES = {
 
 
 def enable(plan, current_hashes, preserve=True):
-    if VERSION not in {"3.0.0-rc5", "3.0.0-rc6"} or not truth(plan["settings"]["REUSE_RC4_OUTPUTS"]):
+    if VERSION not in {"3.0.0-rc5", "3.0.0-rc6", "3.0.0-rc7"} or not truth(plan["settings"]["REUSE_RC4_OUTPUTS"]):
         return {}
     metadata = Path(plan.get("metadata_dir", str(Path(plan["roots"]["out"]) / "run_metadata")))
     for filename in ("source_hashes.json", "rc4_source_hashes.json"):

@@ -2,6 +2,12 @@
 
 ## Sample Sheet
 
+For HaeIII/two-step BL-Hi-C, keep `assay=hic`, select `hic_protocol=blhic`
+(or global `HIC_PROTOCOL=blhic`) and supply original paired FASTQs. Optional
+`blhic_input_state` declares raw/pretrimmed input. See the
+[RC7 BL preprocessing guide](19_blhic_preprocessing.md) for its pinned optional
+tool, HaeIII settings, validation, resources and outputs.
+
 Required columns:
 
 ```csv

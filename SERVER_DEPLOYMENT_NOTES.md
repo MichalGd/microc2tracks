@@ -1,5 +1,21 @@
 # Server Deployment Notes
 
+## RC7 BL-Hi-C update, 2026-11-07
+
+Stage this source as a separate version, for example
+`/opt/microc2tracks/versions/3.0.0-rc7`, and build the optional pinned trimmer
+with `python3 -B scripts/build_trimlinker.py` before making the installation
+read-only. A version-specific `microc2tracks-rc7` launcher can reuse the existing
+shared environment. Do not replace an active installation/default command as
+part of staging. No server installation/promotion was performed locally.
+
+Read [the BL setup guide](docs/19_blhic_preprocessing.md) and RC7 verification
+scope in [TEST_REPORT.md](TEST_REPORT.md). Select `assay=hic` with the `blhic`
+profile, correct HaeIII registry and original paired paths. Choose bulk TMPDIR,
+begin with one preparation worker and perform the bounded real-library pilot
+before processing the full curated selection. Existing plain Hi-C/Micro-C jobs
+require no linker tool. Historical deployment notes follow.
+
 ## RC6 bounded-streaming update, 2026-11-04
 
 Stage the complete RC6 source under `/opt/microc2tracks/versions/3.0.0-rc6` and add

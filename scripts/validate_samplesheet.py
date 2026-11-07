@@ -37,6 +37,7 @@ NORMALIZED_COLUMNS = [
     "restriction_enzymes",
     "dedup_group",
     "final_pool",
+    "blhic_input_state",
 ]
 VALID_ASSAYS = {"microc", "hic"}
 GZIP_SUFFIXES = {".gz", ".gzip"}
@@ -122,9 +123,12 @@ def validate_sheet(
             restriction_enzymes = (row.get("restriction_enzymes") or "").strip()
             dedup_group = (row.get("dedup_group") or "").strip()
             final_pool = (row.get("final_pool") or "").strip()
+            blhic_input_state = (row.get("blhic_input_state") or "").strip().lower()
+            if blhic_input_state and (blhic_input_state not in {"raw", "pretrimmed"} or assay != "hic"):
+                errors.append(f"line {line_number}: blhic_input_state requires hic and raw/pretrimmed")
             if final_pool and not SAFE_MERGE_GROUP.fullmatch(final_pool):
                 errors.append(f"line {line_number}: unsafe final_pool {final_pool!r}")
-            if hic_protocol and hic_protocol not in {"legacy", "restriction_hic", "dovetail_hic"}:
+            if hic_protocol and hic_protocol not in {"legacy", "restriction_hic", "dovetail_hic", "blhic"}:
                 errors.append(f"line {line_number}: unsupported hic_protocol {hic_protocol!r}")
             if assay == "microc" and (hic_protocol or restriction_enzymes):
                 errors.append(f"line {line_number}: Micro-C rows must leave Hi-C-specific columns empty")
@@ -255,6 +259,7 @@ def validate_sheet(
                     "restriction_enzymes": restriction_enzymes,
                     "dedup_group": dedup_group,
                     "final_pool": final_pool,
+                    "blhic_input_state": blhic_input_state,
                 }
             )
 

@@ -26,7 +26,7 @@ def graph(rt, processor, matrices):
     entities = {key: e for key, e in plan["entities"].items() if e["kind"] not in {"external", "external_sorted"}}
 
     def add(key, stage, kind, action, dependencies=(), priority=10, cached=None, prepares="", consumes=""):
-        cpus, memory = reservation(kind, c, plan)
+        cpus, memory = reservation(kind, c, plan, entity=plan["entities"][key])
         if kind == "filter" and plan.get("workflow_mode") == "refilter-deduplicated":
             cpus += int(c["THREADS_SORT"]) + 2
             memory += size_gib(c["PAIRTOOLS_SORT_MEMORY"])
@@ -51,6 +51,11 @@ def graph(rt, processor, matrices):
         destination = plan["roots"]["trimmed" if kind == "fastp" else "matrices" if kind in {"matrix", "hic"} else "pairs"]
         task.disk = {scratch_root: scratch}
         task.disk[destination] = task.disk.get(destination, 0) + output
+        if kind == "fastp" and plan["samples"].get(e["name"], {}).get("preprocessing", {}).get("input_state") == "raw":
+            # Only validation runs initially. Measure the plain byte bound and
+            # grow admission before starting the trimmer; an invented large
+            # compression factor can queue a feasible job indefinitely.
+            task.disk[scratch_root] += raw_bytes
         if c["LARGE_OUTPUT_STAGING"] == "scratch":
             task.disk[scratch_root] += output  # publication source plus destination copy
         if kind == "hic" and c["PUBLIC_HIC_DIR"]:
