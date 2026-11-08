@@ -113,3 +113,5 @@ vendor/trimLinker/ChIA-PET2.h
 vendor/trimLinker/trimLinker.cpp
 vendor/trimLinker/LICENSE.txt
 vendor/trimLinker/source.json
+docs/20_version_4_0_deployment.md
+scripts/install_version_4_0.sh

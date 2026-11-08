@@ -1,5 +1,14 @@
 # Server Deployment Notes
 
+## Version 4.0, 2026-11-08
+
+Use a new `/opt/microc2tracks/versions/4.0` installation and
+`/usr/local/bin/microc2tracks-4.0` command. Reuse the existing shared environment
+and build the pinned standalone linker once. The installer does not change
+the standard commands or running installations. See the
+[4.0 deployment guide](docs/20_version_4_0_deployment.md); it also describes
+separate default-command promotion after active workflow jobs finish.
+
 ## RC7 BL-Hi-C update, 2026-11-07
 
 Stage this source as a separate version, for example

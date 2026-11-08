@@ -1,5 +1,23 @@
 # Test Report
 
+## Version 4.0 promotion: 2026-11-08
+
+Version 4.0 promotes the RC7 implementation without changing its scientific
+transforms. The compatibility version lists now recognize 4.0.
+
+- **19 focused Linux/WSL cases passed**: all 14 BL cases, three relevant RC6
+  checkpoint/migration cases, RC4 source-compatible checkpoint reuse and the
+  actual shared-launcher version/read-only-release test.
+- Bash syntax passed for all 12 shell runners/examples, including the new
+  versioned installer. The earlier RC7 62-case verification remains recorded
+  below and is not presented as a new full-suite run.
+- The optional pinned linker was rebuilt in the 4.0 development checkout.
+- No production mapping or server deployment was performed by this preparation.
+
+The versioned installer builds/tests in user staging, then copies only into a
+new shared release/command. It does not run a package manager or replace current
+default launchers. See the [deployment guide](docs/20_version_4_0_deployment.md).
+
 ## RC7 integrated BL-Hi-C candidate: 2026-11-07
 
 Runtime: **3.0.0-rc7**, based on

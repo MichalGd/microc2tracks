@@ -4,13 +4,17 @@
 
 The first implementation follows the style of the existing Shell repositories `fastq2tracks` and `rnaseq2tracksP`: a top-level runner, `config/`, `docs/`, `examples/`, `scripts/`, `environment.yml`, and simple tests.
 
-Version **3.0.0-rc7** adds automatic HaeIII/two-step BL-Hi-C bridge preprocessing
+Version **4.0** includes automatic HaeIII/two-step BL-Hi-C bridge preprocessing
 under `assay=hic`, selected with `hic_protocol=blhic` or `HIC_PROTOCOL=blhic`.
 Supply the original paired FASTQs; the workflow runs the pinned linker stage,
 optional fastp and the existing mapping/matrix stages. Read the
 [BL-Hi-C setup, integrity and restart guide](docs/19_blhic_preprocessing.md).
 The optional trimmer is built once from bundled source; no runtime download or
 change to an active server installation is performed.
+
+Version 4.0 names the previously prepared RC7 implementation. Assay processing
+and scientific stage contracts are unchanged by the version promotion.
+See the [version 4.0 deployment guide](docs/20_version_4_0_deployment.md).
 
 RC6 added checked streaming joint deduplication, bounded contact
 filtering and parallel Juicer export, compatible pooled QC/raw-count reuse,

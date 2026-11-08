@@ -16,7 +16,7 @@ def sorted_checkpoint(runtime, name):
     old = runtime.previous_plan
     current = runtime.plan
     version = old.get("workflow_version")
-    if (not old or version not in {"3.0.0-rc4", "3.0.0-rc5", "3.0.0-rc6", "3.0.0-rc7"}
+    if (not old or version not in {"3.0.0-rc4", "3.0.0-rc5", "3.0.0-rc6", "3.0.0-rc7", "4.0"}
             or (version == "3.0.0-rc4" and not runtime.rc4_hashes)
             or (version == "3.0.0-rc5" and not runtime.rc5_hashes)):
         raise ValueError("Checkpoint resume requires a recognized prior run/source fingerprint")

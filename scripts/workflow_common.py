@@ -15,7 +15,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-VERSION = "3.0.0-rc7"
+VERSION = "4.0"
 DEFAULTS = {
     "WORKFLOW_MODE": "fastq",
     "RESUME_FROM_CHECKPOINTS": "false", "REUSE_RC5_OUTPUTS": "true",

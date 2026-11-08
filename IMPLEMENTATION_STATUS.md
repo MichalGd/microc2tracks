@@ -1,4 +1,12 @@
-# Integrated workflow status: 3.0.0-rc7
+# Integrated workflow status: 4.0
+
+Version 4.0 prepared 2026-11-08 from the implemented RC7 commit
+`53b977781396a3cd7dde68e35b53c2cbe3945eb7`. This promotes the version label,
+retains its processing behavior, and recognizes 4.0 in checkpoint/legacy
+compatibility checks. See the [deployment guide](docs/20_version_4_0_deployment.md).
+Server installation remains an explicit administrator action.
+
+## Historical RC7 implementation
 
 RC7 prepared 2026-11-07 from `c3fce30abf8312653180e0296cb408dfb11da5b5`.
 Native HaeIII/two-step BL bridge processing is implemented inside the existing

@@ -1,4 +1,8 @@
-# Integrated BL-Hi-C: RC7
+# Integrated BL-Hi-C: version 4.0 (implemented in RC7)
+
+The RC7 implementation is published under version 4.0. The linker preset,
+contact processing and scientific stage contracts are unchanged. Use the
+[4.0 deployment guide](20_version_4_0_deployment.md) for installation.
 
 Select `assay=hic` and `hic_protocol=blhic` in the samplesheet, or set
 `HIC_PROTOCOL="blhic"` for a homogeneous run. Point `fastq_r1`/`fastq_r2` at

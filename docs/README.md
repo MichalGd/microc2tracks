@@ -16,6 +16,7 @@ flowchart TD
 
 | Document | Purpose |
 |---|---|
+| `20_version_4_0_deployment.md` | Publish/install version 4.0, shared versioned command and optional default promotion. |
 | `19_blhic_preprocessing.md` | RC7 native HaeIII/two-step bridge processing, optional pinned tool, QC, resources and resume. |
 | `01_analysis_and_design.md` | Legacy-script analysis, method-review synthesis, and workflow architecture. |
 | `02_installation_server.md` | Shared Linux server setup, conda installation, permissions, and resource profiles. |

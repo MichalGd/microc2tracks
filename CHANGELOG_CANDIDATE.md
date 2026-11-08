@@ -1,5 +1,13 @@
 # Changelog
 
+## 4.0 - BL-Hi-C release (2026-11-08)
+
+- Publish the implemented RC7 workflow as version 4.0 / Git tag v4.0.
+- Preserve its scientific processing and add 4.0 to the existing checkpoint
+  and RC4 compatibility version lists.
+- Document versioned server installation, one-time optional linker build,
+  transfer commands and explicit default-command promotion.
+
 ## 3.0.0-rc7 - integrated BL-Hi-C (2026-11-07)
 
 - Add `hic_protocol=blhic` / `HIC_PROTOCOL=blhic`, fixed HaeIII/two-step preset,
