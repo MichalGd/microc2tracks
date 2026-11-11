@@ -16,6 +16,8 @@ flowchart TD
 
 | Document | Purpose |
 |---|---|
+| `22_version_4_1_deployment.md` | Install 4.1 beside existing releases and optionally promote the standard commands. |
+| `21_arima_hic.md` | Native Arima two-motif profile, direct IUPAC cut patterns, Chen evidence and validation scope. |
 | `20_version_4_0_deployment.md` | Publish/install version 4.0, shared versioned command and optional default promotion. |
 | `19_blhic_preprocessing.md` | RC7 native HaeIII/two-step bridge processing, optional pinned tool, QC, resources and resume. |
 | `01_analysis_and_design.md` | Legacy-script analysis, method-review synthesis, and workflow architecture. |

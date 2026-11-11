@@ -1,5 +1,19 @@
 # microc2tracks
 
+Version **4.1** adds native two-motif Arima Hi-C support:
+keep `assay=hic` and select `hic_protocol=arima_2enzyme` (or global
+`HIC_PROTOCOL=arima_2enzyme`). The workflow builds the combined `^GATC` /
+`G^ANTC` restriction-fragment map from the selected reference automatically.
+No project-specific source patch or separate preprocessing command is needed.
+The generic `restriction_hic` profile also accepts DNA IUPAC cut patterns
+directly, for example `HIC_RESTRICTION_ENZYMES="^GATC+G^ANTC"`, as well as
+registered enzyme names. Cleavage positions remain explicit.
+See the [Arima protocol guide](docs/21_arima_hic.md), including inherited enzyme
+settings, kit scope, Chen GSE212455 evidence and validation limits.
+See the [4.1 server update guide](docs/22_version_4_1_deployment.md) for a
+separate versioned installation and optional default-command promotion.
+Publishing the source does not update an installed server automatically.
+
 `microc2tracks` is a shell-script-first Micro-C / Hi-C workflow for producing common contact matrix outputs and downstream analyses from paired-end FASTQ files.
 
 The first implementation follows the style of the existing Shell repositories `fastq2tracks` and `rnaseq2tracksP`: a top-level runner, `config/`, `docs/`, `examples/`, `scripts/`, `environment.yml`, and simple tests.

@@ -10,15 +10,19 @@ from pathlib import Path
 
 from artifact_state import FileLock
 from reference_registry import read_sizes
-from workflow_common import json_write, registry_data, sha256, signature
+from workflow_common import IUPAC_BASES, json_write, registry_data, resolve_restriction_definitions, sha256, signature
 
-GENERATOR_VERSION = 1
+GENERATOR_VERSION = 2
 
 
 def scan_fasta(fasta: Path, definitions: dict, chunk_size: int = 1024 * 1024, check=None):
     """Scan with a motif-length overlap; do not join an entire genome in memory."""
     longest = max(len(x["motif"]) for x in definitions.values())
-    patterns = [(re.compile(f"(?={value['motif']})"), value["cut_offset"]) for value in definitions.values()]
+    # Motifs are validated DNA IUPAC, never arbitrary regular expressions.
+    # Ambiguity symbols match known genomic bases only, not unresolved reference bases.
+    # Keep biological length separately: regex expansion changes its text length.
+    patterns = [(re.compile("(?=" + "".join("[" + IUPAC_BASES[base] + "]" for base in value["motif"]) + ")"),
+                 value["cut_offset"], len(value["motif"])) for value in definitions.values()]
     chrom, length, pending, tail, cuts = None, 0, "", "", set()
 
     def scan(block, final=False):
@@ -27,8 +31,7 @@ def scan_fasta(fasta: Path, definitions: dict, chunk_size: int = 1024 * 1024, ch
             check()
         sequence = tail + block.upper()
         origin = length - len(tail)
-        for pattern, offset in patterns:
-            motif_length = len(pattern.pattern) - 4
+        for pattern, offset, motif_length in patterns:
             for match in pattern.finditer(sequence):
                 if match.start() + motif_length > len(tail):
                     cuts.add(origin + match.start() + offset)
@@ -106,12 +109,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fasta", type=Path, required=True)
     parser.add_argument("--chrom-sizes", type=Path, required=True)
-    parser.add_argument("--enzymes", required=True, help="Explicit '+'-separated enzyme names")
+    parser.add_argument("--enzymes", required=True, help="'+'-separated enzyme names or IUPAC cut motifs, e.g. '^GATC+G^ANTC'")
     parser.add_argument("--registry", type=Path, default=Path(__file__).resolve().parent.parent / "config/hic_protocols.json")
     parser.add_argument("--cache", type=Path, required=True)
     args = parser.parse_args()
     data = registry_data(args.registry)
-    definitions = {name: data["enzymes"][name] for name in args.enzymes.split("+")}
+    definitions = resolve_restriction_definitions(args.enzymes, data)
+    if not definitions:
+        parser.error("At least one enzyme or explicit cut motif is required")
     print(prepare(args.fasta, args.chrom_sizes, definitions, args.cache)[0])
 
 

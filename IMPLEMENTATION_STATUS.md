@@ -1,4 +1,15 @@
-# Integrated workflow status: 4.0
+# Integrated workflow status: 4.1
+
+Native `arima_2enzyme` Hi-C and direct DNA IUPAC cut patterns were implemented
+locally on 2026-11-11, based on public 4.0 commit
+`2df4c1a79645357eb4c8b7c97fb715bb91dc8a09`. See
+[the protocol guide](docs/21_arima_hic.md) and [validation](TEST_REPORT.md).
+Version 4.1 promotes that implementation without changing the tested scientific
+transforms. The [4.1 deployment guide](docs/22_version_4_1_deployment.md) covers
+the new versioned installer. Publishing v4.1 does not perform server installation
+or production mapping. Use the 4.1 installer, not the historical 4.0 installer.
+
+## Historical 4.0 release
 
 Version 4.0 prepared 2026-11-08 from the implemented RC7 commit
 `53b977781396a3cd7dde68e35b53c2cbe3945eb7`. This promotes the version label,

@@ -10,6 +10,7 @@ microc2tracks/
   config/launcher.conf.example
   config/references.tsv
   config/samplesheet_blhic_example.csv
+  config/samplesheet_arima_example.csv
   config/samplesheet_dovetail_example.csv
   config/samplesheet_example.csv
   config/samplesheet_hic_example.csv
@@ -36,6 +37,8 @@ microc2tracks/
   docs/18_rc6_streaming_recovery_and_storage.md
   docs/19_blhic_preprocessing.md
   docs/20_version_4_0_deployment.md
+  docs/21_arima_hic.md
+  docs/22_version_4_1_deployment.md
   docs/rc6_filter_benchmark.json
   docs/README.md
   environment.yml
@@ -63,6 +66,8 @@ microc2tracks/
   scripts/export_insulation_bedgraph.py
   scripts/filter_contact_pairs.py
   scripts/install_version_4_0.sh
+  scripts/install_version_4_1.sh
+  scripts/promote_version_4_1.sh
   scripts/juicer_export.py
   scripts/matrix_products.py
   scripts/merge_replicates.sh
@@ -96,6 +101,7 @@ microc2tracks/
   SERVER_DEPLOYMENT_NOTES.md
   TEST_REPORT.md
   tests/benchmark_rc6.py
+  tests/test_arima.py
   tests/check_bash_syntax.sh
   tests/mock_rc6_transport.py
   tests/test_blhic.py

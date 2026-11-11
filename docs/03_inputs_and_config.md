@@ -2,6 +2,11 @@
 
 ## Sample Sheet
 
+For the two-motif Arima protocol, keep `assay=hic` and select
+`hic_protocol=arima_2enzyme` (or global `HIC_PROTOCOL=arima_2enzyme`).
+The combined reference digest is generated automatically. See the
+[Arima guide](21_arima_hic.md) for enzyme-setting precedence and kit scope.
+
 For HaeIII/two-step BL-Hi-C, keep `assay=hic`, select `hic_protocol=blhic`
 (or global `HIC_PROTOCOL=blhic`) and supply original paired FASTQs. Optional
 `blhic_input_state` declares raw/pretrimmed input. See the

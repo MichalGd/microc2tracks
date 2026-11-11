@@ -42,8 +42,8 @@ safety rule. Existing originals and prior run metadata remain available.
 
 | Optional column | Meaning when nonempty | Blank/absent |
 |---|---|---|
-| `hic_protocol` | `legacy`, `restriction_hic`, `dovetail_hic`, `blhic` (RC7) | Inherit config; old configs without HIC_PROTOCOL fall back to legacy |
-| `restriction_enzymes` | Explicit `+`-separated supported enzyme names | Inherit config or selected preset |
+| `hic_protocol` | `legacy`, `restriction_hic`, `dovetail_hic`, `arima_2enzyme`, `blhic` | Inherit config; old configs without HIC_PROTOCOL fall back to legacy |
+| `restriction_enzymes` | `+`-separated enzyme names or explicit IUPAC cut motifs (`^GATC+G^ANTC`) | Inherit config or selected preset |
 | `dedup_group` | User-selected rows to deduplicate together once | Independent singleton row |
 
 Existing `merge_group` defines an output pool, **not** duplicate scope. Existing
@@ -75,10 +75,22 @@ Configs are trusted Bash code; sample metadata is never evaluated as shell code.
 ### Enzymes and filtering
 
 `config/hic_protocols.json` defines DpnII (`^GATC`), MboI (`^GATC`), NlaIII
-(`CATG^`), HindIII (`A^AGCTT`) and HaeIII (`GG^CC`, RC7). Use one or an explicit combination such as
+(`CATG^`), HindIII (`A^AGCTT`), HaeIII (`GG^CC`, RC7) and HinfI (`G^ANTC`, 4.1). Use one or an explicit combination such as
 `DpnII+NlaIII`. Combined digests union cut positions. Recognition motifs are not
-inferred from an assembly. The initial extensible registry validates palindromic
-literal A/C/G/T motifs and their plus-strand cut offsets.
+inferred from an assembly. The registry validates palindromic DNA IUPAC motifs
+(`ACGTRYSWKMBDHVN`) and their plus-strand cut offsets. Ambiguity codes expand
+to concrete A/C/G/T bases; ambiguous reference bases are not matches. You may
+also enter patterns directly in `HIC_RESTRICTION_ENZYMES` or the row's
+`restriction_enzymes`, for example `^GATC+G^ANTC`. Each pattern needs exactly
+one ASCII `^` cut marker. Arbitrary regex, nonpalindromic motifs and cuts outside
+the recognition motif remain unsupported. The [Arima guide](21_arima_hic.md)
+lists the ambiguity alphabet and configuration examples.
+
+The `arima_2enzyme` profile supplies DpnII+HinfI, requires their exact `^GATC`
+and `G^ANTC` definitions, and rejects contradictory inherited settings. It
+uses the ordinary Hi-C read preparation and contact filter. This is the
+specified two-motif protocol, not a preset for every Arima kit. See the
+[Arima guide](21_arima_hic.md).
 
 The optional `dovetail_hic` profile denotes the original DpnII-based kit, not
 Omni-C or LinkPrep. It rejects contradictory enzyme settings. It adds no

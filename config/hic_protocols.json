@@ -6,12 +6,14 @@
     "MboI": {"motif": "GATC", "cut_offset": 0},
     "NlaIII": {"motif": "CATG", "cut_offset": 4},
     "HindIII": {"motif": "AAGCTT", "cut_offset": 1},
-    "HaeIII": {"motif": "GGCC", "cut_offset": 2}
+    "HaeIII": {"motif": "GGCC", "cut_offset": 2},
+    "HinfI": {"motif": "GANTC", "cut_offset": 1}
   },
   "profiles": {
     "legacy": {"restriction_filtering": false},
     "restriction_hic": {"restriction_filtering": true},
     "dovetail_hic": {"restriction_filtering": true, "enzymes": "DpnII"},
+    "arima_2enzyme": {"restriction_filtering": true, "enzymes": "DpnII+HinfI"},
     "blhic": {"restriction_filtering": true, "enzymes": "HaeIII"}
   }
 }

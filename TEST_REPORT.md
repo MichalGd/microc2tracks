@@ -1,5 +1,61 @@
 # Test Report
 
+## Version 4.1 release and installer: 2026-11-11
+
+Version 4.1 promotes the Arima/IUPAC implementation below without changing its
+scientific transforms. The current-version checkpoint guard recognizes 4.1.
+
+- The actual packaged installer completed in a temporary local Linux prefix,
+  with sudo/chown mocked and no system or server paths modified.
+- It built the pinned linker and passed **29 tests** in 8.639 seconds: the 12
+  Arima/IUPAC cases, all 14 BL cases, two checkpoint cases and the actual shared
+  launcher version/read-only-release test. These overlap the earlier 64 cases;
+  they are not advertised as additional unique scientific tests.
+- Check-only mode created no staging directory and invoked no sudo. A corrupt
+  source archive, existing destination and broken versioned symlink were refused.
+- The installer retained existing default launchers and the 4.0 fixture source;
+  the new installed release had shared read/execute permissions.
+- Separate promotion was exercised against temporary defaults: all three moved
+  to 4.1, their original entries were backed up, and the old versioned command
+  and source stayed intact.
+- Installer/promotion Bash syntax, PowerShell transfer syntax and source archive
+  membership/contents were checked. No production mapping was started.
+
+## Native Arima / IUPAC candidate: 2026-11-11
+
+Version **4.1-dev**, based on public 4.0 commit
+`2df4c1a79645357eb4c8b7c97fb715bb91dc8a09`.
+
+**64 tests passed, zero failures/errors/skips**, in 33.445 seconds on the
+existing local Ubuntu WSL Python 3.12.3 environment:
+
+- 12 new Arima/IUPAC tests: each ambiguity symbol and complement, concrete-base
+  matching across real chunk/line boundaries, explicit cuts, known/novel motif
+  config, invalid inputs, combined digest/filter boundaries, cache reuse,
+  native planner and named/literal stage-signature equivalence.
+- 24 existing integration/scientific-policy cases.
+- 10 existing refilter cases.
+- 14 existing BL cases, using the existing pinned real trimLinker binary on tiny
+  synthetic inputs; mapping/contact tool orchestration is mocked in those cases.
+- Three existing missing-raw/checkpoint/RC5-migration cases, plus the actual
+  shared-launcher version/read-only-release test.
+
+Invocation from `tests/`:
+
+```bash
+python3 -B -m unittest -v test_arima test_integration_features test_refilter_mode test_blhic \
+  test_rc6_safety.SafetyTests.test_resume_with_removed_fastqs_uses_recorded_lineage_and_rejects_science_changes \
+  test_rc6_safety.SafetyTests.test_completed_library_resumes_after_raw_and_sorted_inputs_removed \
+  test_rc6_safety.SafetyTests.test_exact_rc5_sorted_contract_migrates_without_rewriting_payload_or_proof \
+  test_shared_installation.SharedInstallationTests.test_actual_version_runs_without_writes_in_release
+```
+
+This validates the new native recognition/configuration paths and affected
+existing behavior, not a full production alignment or a real-tool matrix build.
+No server software was installed, no mapping was started, and no new release
+was pushed/tagged. Prior private-Chen/RC4 checkpoint migration is not newly
+certified; the historical 4.0 installer is not an installer for this candidate.
+
 ## Version 4.0 promotion: 2026-11-08
 
 Version 4.0 promotes the RC7 implementation without changing its scientific

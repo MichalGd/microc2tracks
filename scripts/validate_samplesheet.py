@@ -128,7 +128,7 @@ def validate_sheet(
                 errors.append(f"line {line_number}: blhic_input_state requires hic and raw/pretrimmed")
             if final_pool and not SAFE_MERGE_GROUP.fullmatch(final_pool):
                 errors.append(f"line {line_number}: unsafe final_pool {final_pool!r}")
-            if hic_protocol and hic_protocol not in {"legacy", "restriction_hic", "dovetail_hic", "blhic"}:
+            if hic_protocol and hic_protocol not in {"legacy", "restriction_hic", "dovetail_hic", "arima_2enzyme", "blhic"}:
                 errors.append(f"line {line_number}: unsupported hic_protocol {hic_protocol!r}")
             if assay == "microc" and (hic_protocol or restriction_enzymes):
                 errors.append(f"line {line_number}: Micro-C rows must leave Hi-C-specific columns empty")

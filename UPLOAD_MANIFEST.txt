@@ -115,3 +115,9 @@ vendor/trimLinker/LICENSE.txt
 vendor/trimLinker/source.json
 docs/20_version_4_0_deployment.md
 scripts/install_version_4_0.sh
+config/samplesheet_arima_example.csv
+docs/21_arima_hic.md
+tests/test_arima.py
+scripts/install_version_4_1.sh
+scripts/promote_version_4_1.sh
+docs/22_version_4_1_deployment.md

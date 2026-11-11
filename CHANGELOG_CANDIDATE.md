@@ -1,5 +1,19 @@
 # Changelog
 
+## 4.1 - native Arima and IUPAC cut patterns (2026-11-11)
+
+- Add `arima_2enzyme` under `assay=hic`, with validated `^GATC` and `G^ANTC`
+  definitions and automatic combined reference digest generation.
+- Support full DNA IUPAC recognition symbols, concrete-reference matching,
+  reverse-complement palindrome validation and explicit cleavage positions.
+- Accept named enzymes or caret-marked motifs through the existing global/row
+  enzyme fields and fragment-generator CLI; no additional preprocessing step.
+- Preserve ordinary alignment/dedup semantics and existing profiles. Digest
+  cache generator version is 2; the current version can resume its checkpoints.
+- Add focused scientific/configuration tests and documented kit scope.
+- Provide a separate versioned installer and optional default-command promotion;
+  reuse the existing environment and preserve running releases. Git tag: v4.1.
+
 ## 4.0 - BL-Hi-C release (2026-11-08)
 
 - Publish the implemented RC7 workflow as version 4.0 / Git tag v4.0.

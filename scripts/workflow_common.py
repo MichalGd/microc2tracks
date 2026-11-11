@@ -15,7 +15,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-VERSION = "4.0"
+VERSION = "4.1"
 DEFAULTS = {
     "WORKFLOW_MODE": "fastq",
     "RESUME_FROM_CHECKPOINTS": "false", "REUSE_RC5_OUTPUTS": "true",
@@ -279,16 +279,61 @@ def bounded_lines(handle, max_bytes=16777216):
         yield line
 
 
+IUPAC_BASES = {
+    "A": "A", "C": "C", "G": "G", "T": "T", "R": "AG", "Y": "CT",
+    "S": "CG", "W": "AT", "K": "GT", "M": "AC", "B": "CGT", "D": "AGT",
+    "H": "ACT", "V": "ACG", "N": "ACGT",
+}
+IUPAC_COMPLEMENT = str.maketrans("ACGTRYSWKMBDHVN", "TGCAYRSWMKVHDBN")
+
+
+def validate_restriction_motif(motif: str, offset: int, label: str):
+    if not re.fullmatch("[ACGTRYSWKMBDHVN]+", motif) or motif != motif.translate(IUPAC_COMPLEMENT)[::-1]:
+        raise ValueError(f"{label}: requires a palindromic DNA IUPAC motif (ACGTRYSWKMBDHVN)")
+    if not isinstance(offset, int) or not 0 <= offset <= len(motif):
+        raise ValueError(f"{label}: invalid cut offset")
+
+
 def registry_data(path: Path) -> dict:
     data = json.loads(path.read_text(encoding="utf-8"))
     for name, enzyme in data["enzymes"].items():
         safe_id(name)
         motif, offset = enzyme["motif"], enzyme["cut_offset"]
-        if not re.fullmatch("[ACGT]+", motif) or motif != motif.translate(str.maketrans("ACGT", "TGCA"))[::-1]:
-            raise ValueError(f"Enzyme {name}: this release requires a palindromic A/C/G/T motif")
-        if not isinstance(offset, int) or not 0 <= offset <= len(motif):
-            raise ValueError(f"Enzyme {name}: invalid cut offset")
+        validate_restriction_motif(motif, offset, f"Enzyme {name}")
     return data
+
+
+def resolve_restriction_definitions(value: str, data: dict, preferred=()) -> dict:
+    """Resolve '+'-separated enzyme names or explicit cut motifs; never evaluate regex."""
+    registered = data["enzymes"]
+    aliases = {name.lower(): name for name in registered}
+    definitions = {}
+    for token in (part.strip() for part in value.split("+")):
+        if not token:
+            continue
+        if token.lower() in aliases:
+            name = aliases[token.lower()]
+            definition = registered[name]
+        elif "^" in token:
+            if token.count("^") != 1:
+                raise ValueError(f"Restriction pattern {token!r} requires exactly one '^' cleavage marker")
+            offset = token.index("^")
+            motif = token.replace("^", "").upper()
+            validate_restriction_motif(motif, offset, f"Restriction pattern {token!r}")
+            definition = {"motif": motif, "cut_offset": offset}
+            # Keep equivalent named/literal selections identical in stage signatures.
+            matches = [name for name in (*preferred, *sorted(registered))
+                       if registered.get(name) == definition]
+            name = matches[0] if matches else f"motif_{motif}_cut{offset}"
+            if name in registered and registered[name] != definition:
+                raise ValueError(f"Restriction pattern identifier collides with registry enzyme {name!r}")
+        else:
+            raise ValueError(f"Unsupported enzyme {token!r}; use a registered enzyme name or "
+                             "an explicit IUPAC cut motif such as G^ANTC, joined with '+'")
+        if name in definitions and definitions[name] != definition:
+            raise ValueError(f"Conflicting definitions for restriction enzyme {name!r}")
+        definitions[name] = definition
+    return {name: definitions[name] for name in sorted(definitions)}
 
 
 def resolve_policy(row: dict, c: dict) -> dict:
@@ -298,6 +343,7 @@ def resolve_policy(row: dict, c: dict) -> dict:
     if row.get("blhic_input_state") and profile != "blhic":
         raise ValueError("blhic_input_state is only valid for the blhic protocol")
     enzymes: list[str] = []
+    definitions: dict = {}
     if assay == "microc":
         if row.get("hic_protocol") or row.get("restriction_enzymes"):
             raise ValueError("Micro-C rows must leave hic_protocol/restriction_enzymes empty")
@@ -307,21 +353,24 @@ def resolve_policy(row: dict, c: dict) -> dict:
         preset = data["profiles"][profile]
         value = row.get("restriction_enzymes") or c["HIC_RESTRICTION_ENZYMES"] or preset.get("enzymes", "")
         if preset["restriction_filtering"]:
-            aliases = {key.lower(): key for key in data["enzymes"]}
-            try:
-                enzymes = sorted({aliases[x.strip().lower()] for x in value.split("+") if x.strip()})
-            except KeyError as exc:
-                raise ValueError(f"Unsupported enzyme {exc.args[0]!r}; supported: {', '.join(aliases.values())}") from exc
+            definitions = resolve_restriction_definitions(value, data, preset.get("enzymes", "").split("+"))
+            enzymes = list(definitions)
             if not enzymes:
                 raise ValueError("Restriction Hi-C requires explicit restriction_enzymes/HIC_RESTRICTION_ENZYMES")
             if profile == "dovetail_hic" and enzymes != ["DpnII"]:
                 raise ValueError("dovetail_hic is the original DpnII kit; use restriction_hic for other digests")
-            if profile == "blhic" and (enzymes != ["HaeIII"] or data["enzymes"]["HaeIII"] != {"motif": "GGCC", "cut_offset": 2}):
+            if profile == "arima_2enzyme" and (enzymes != ["DpnII", "HinfI"] or
+                    definitions != {
+                        "DpnII": {"motif": "GATC", "cut_offset": 0},
+                        "HinfI": {"motif": "GANTC", "cut_offset": 1}}):
+                raise ValueError("arima_2enzyme requires DpnII (^GATC) + HinfI (G^ANTC); "
+                                 "clear an inherited enzyme setting or set restriction_enzymes=DpnII+HinfI")
+            if profile == "blhic" and (enzymes != ["HaeIII"] or definitions["HaeIII"] != {"motif": "GGCC", "cut_offset": 2}):
                 raise ValueError("blhic requires HaeIII (GGCC, offset 2); override an inherited enzyme with restriction_enzymes=HaeIII")
         elif value:
             raise ValueError("legacy Hi-C cannot silently ignore an enzyme; select restriction_hic")
     return {"assay": assay, "profile": profile, "enzymes": enzymes,
-            "enzyme_definitions": {name: data["enzymes"][name] for name in enzymes},
+            "enzyme_definitions": definitions,
             "mapq": int(c["MAPQ_THRESHOLD"]),
             "min_cis_dist": int(c["MICROC_MIN_CIS_DIST"] if assay == "microc" else c["HIC_MIN_CIS_DIST"]),
             "remove_same_fragment": bool(enzymes) and truth(c["HIC_REMOVE_SAME_FRAGMENT"]),
